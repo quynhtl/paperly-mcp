@@ -321,6 +321,9 @@ describe("the tools", () => {
     assert.equal(past.isError, true);
     const none = await server.call("get_fulltext", { key: "BOOK0001" });
     assert.match(none.text, /has no full text/);
+    // A file Paperly has no text of, in a library that is there
+    const unindexed = await server.call("get_fulltext", { key: "LONG0001" });
+    assert.match(unindexed.text, /^Swann's Way has no full text/);
   });
 
   test("get_fulltext never cuts a character in half", async () => {
@@ -502,22 +505,25 @@ describe("a library or an address Paperly does not have", () => {
   const wrong = async (env, library) => {
     const server = startServer(env);
     try {
-      // A list Paperly has no answer for is no empty library
+      // A list Paperly has no answer for is no empty library, and a key it
+      // has no answer for, no key the library lacks
       for (const [tool, args] of [
         ["search_library", { query: "attention" }],
         ["search_library", { query: "attention", mode: "everything" }],
         ["search_library", { query: "attention", tag: "transformers" }],
         ["list_collections", {}],
         ["format_bibliography", { keys: ["ATTN0001"] }],
+        ["get_item", { key: "ATTN0001" }],
+        ["get_fulltext", { key: "ATTN0001" }],
+        ["get_notes", { key: "ATTN0001" }],
+        ["get_annotations", { key: "ATTN0001" }],
+        ["get_collection_items", { key: "THES0001" }],
       ]) {
         const { text, isError } = await server.call(tool, args);
         assert.equal(isError, true, tool);
         assert.ok(text.startsWith(`Paperly has no library "${library}" at http://127.0.0.1:`), text);
         assert.match(text, /Check PAPERLY_LIBRARY .* and PAPERLY_API_URL /);
       }
-      // One item may just not be there
-      const item = await server.call("get_item", { key: "ATTN0001" });
-      assert.match(item.text, /^No item in the library has the key ATTN0001/);
     } finally {
       await server.close();
     }

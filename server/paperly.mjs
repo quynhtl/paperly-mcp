@@ -52,10 +52,13 @@ export class Paperly {
   /**
    * GET a path under the library (or, with `absolute`, under /api/).
    *
-   * A 404 for a `lookup` -- one item, collection or full text, by its key --
-   * is null: that one is not there. For a list it is never that, as Paperly
-   * answers a list with what it has, if nothing: the library itself is not
-   * there, or Paperly's local API is not at that address.
+   * A 404 for a list is never "nothing there", as Paperly answers a list with
+   * what it has, if nothing: the library itself is not there, or Paperly's
+   * local API is not at that address. For a `lookup` -- one item, collection
+   * or full text, by its key -- it is null, that one is not there, but only
+   * once the library answers a list: Paperly answers 404 just the same for
+   * every key in a group it is not in, and at an address that is not its
+   * local API's.
    */
   async get(path, params = {}, { absolute = false, as = "json", lookup = false } = {}) {
     const url = new URL(absolute ? path : `${this.library}/${path}`, this.root);
@@ -96,6 +99,9 @@ export class Paperly {
     }
     if (response.status === 404) {
       if (lookup) {
+        // A list that costs Paperly next to nothing, and throws if the library
+        // is not there either
+        await this.keys("collections", { limit: 1 });
         return null;
       }
       throw new ToolError(
