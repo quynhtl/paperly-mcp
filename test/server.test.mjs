@@ -178,6 +178,8 @@ describe("the tools", () => {
     assert.equal(empty.text, "The collection is empty.");
     const missing = await server.call("get_collection_items", { key: "NOPE0000" });
     assert.equal(missing.isError, true);
+    assert.match(missing.text, /No collection has the key NOPE0000/);
+    assert.doesNotMatch(missing.text, /ATTN0001/);
   });
 
   test("format_bibliography asks Paperly for the style", async () => {

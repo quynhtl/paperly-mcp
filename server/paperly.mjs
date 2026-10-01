@@ -70,6 +70,10 @@ export class Paperly {
     return this.get("collections");
   }
 
+  collection(key) {
+    return this.get(`collections/${encodeURIComponent(key)}`);
+  }
+
   collectionItems(key, { limit = 50 } = {}) {
     return this.get(`collections/${encodeURIComponent(key)}/items/top`, { limit, sort: "title" });
   }

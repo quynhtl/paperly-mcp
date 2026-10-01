@@ -1,6 +1,7 @@
 // A stand-in for Paperly's local API with a small library in it, enough to
-// exercise every tool. Answers as the real one does: JSON for data, HTML for
-// format=bib, 404 for unknown keys, 403 when the API is "turned off".
+// exercise every tool. Answers as the real one does, quirks included: JSON for
+// data, HTML for format=bib, 404 for an unknown item or collection, 403 when
+// the API is "turned off".
 import http from "node:http";
 
 const pdfText = Array.from({ length: 2500 }, (_, i) => `Sentence ${i} of the paper about attention.`).join(" ");
@@ -218,9 +219,15 @@ export function startFakePaperly(options = { enabled: true }) {
     if (path === "collections") {
       return list(res, LIBRARY.collections, q);
     }
+    if ((m = /^collections\/([A-Z0-9]{8})$/.exec(path))) {
+      const collection = LIBRARY.collections.find((c) => c.key === m[1]);
+      return collection ? json(res, 200, collection) : json(res, 404, "Not found");
+    }
     if ((m = /^collections\/([A-Z0-9]{8})\/items\/top$/.exec(path))) {
-      if (!LIBRARY.collections.some((c) => c.key === m[1])) return json(res, 404, "Not found");
-      return list(res, LIBRARY.items.filter((i) => isTop(i) && i.data.collections?.includes(m[1])), q);
+      // Paperly drops the condition on a collection it cannot find, and so lists
+      // every top-level item in the library
+      const known = LIBRARY.collections.some((c) => c.key === m[1]);
+      return list(res, LIBRARY.items.filter((i) => isTop(i) && (!known || i.data.collections?.includes(m[1]))), q);
     }
     json(res, 404, "Not found");
   });

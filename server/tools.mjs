@@ -293,10 +293,12 @@ export function addTools(server, paperly) {
     },
     annotations: READ_ONLY,
     async run({ key, limit = 50 }) {
-      const items = await paperly.collectionItems(key, { limit });
-      if (items === null) {
+      // Asked for the items of a collection it does not have, Paperly answers with
+      // every item in the library; only the collection itself is a 404
+      if (!(await paperly.collection(key))) {
         throw new ToolError(`No collection has the key ${key}. Find keys with list_collections.`);
       }
+      const items = (await paperly.collectionItems(key, { limit })) || [];
       return items.length ? items.map(itemLine).join("\n") : "The collection is empty.";
     },
   });
