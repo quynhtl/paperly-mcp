@@ -87,6 +87,11 @@ const SKIPPED_FIELDS = new Set([
   "parentItem",
   "deleted",
   "inPublications",
+  // A note's HTML, or a file's: one made from a book's highlights runs to
+  // hundreds of thousands of characters
+  "note",
+  // Where an annotation is on its page, as JSON
+  "annotationPosition",
   // A stored file's bookkeeping
   "md5",
   "mtime",

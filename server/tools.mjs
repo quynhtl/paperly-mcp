@@ -27,6 +27,9 @@ const SLICE_MAX = 60000;
 // the same reason: a book highlighted from cover to cover runs far past it
 const PAGE = 40000;
 
+// get_item shows no more of a note than this: get_notes reads it in pages
+const NOTE_PREVIEW = 300;
+
 // When an item has several files, read the one most likely to be the paper
 const FULLTEXT_PREFERENCE = { "application/pdf": 0, "application/epub+zip": 1, "text/html": 2 };
 
@@ -196,6 +199,20 @@ export function addTools(server, paperly) {
         throw new ToolError(`No item in the library has the key ${key}. Find keys with search_library.`);
       }
       const lines = [itemDetails(item)];
+      // A note, or the note a file holds, as text, and only how it begins
+      const note = htmlToText(item.data.note);
+      if (note) {
+        const end = charBoundary(note, NOTE_PREVIEW);
+        if (end < note.length) {
+          lines.push(
+            "",
+            `Note, as it begins:\n${note.slice(0, end)}…`,
+            `(Read the whole note, ${note.length} characters, with get_notes and key ${key}.)`,
+          );
+        } else {
+          lines.push("", `Note:\n${note}`);
+        }
+      }
       if (item.data.itemType !== "attachment" && item.data.itemType !== "note") {
         const children = await paperly.children(key);
         const attachments = ofType(children, "attachment");
@@ -307,7 +324,8 @@ export function addTools(server, paperly) {
     name: "get_notes",
     title: "Read an item's notes",
     description:
-      "The notes attached to an item, as plain text. Give a note's own key to read just that note. " +
+      "The notes attached to an item, as plain text. Give a note's own key to read just that note, " +
+      "or a file's key to read the note the file holds. " +
       "Long or many notes come in pages of about 40,000 characters; the answer says which offset to ask for next.",
     inputSchema: {
       type: "object",
@@ -321,7 +339,9 @@ export function addTools(server, paperly) {
     annotations: READ_ONLY,
     async run({ key, offset = 0 }) {
       const item = await requireItem(paperly, key);
-      const notes = item.data.itemType === "note" ? [item] : ofType(await paperly.children(key), "note");
+      // A file has no notes as children, but can hold a note of its own
+      const own = item.data.itemType === "note" || (item.data.itemType === "attachment" && item.data.note);
+      const notes = own ? [item] : ofType(await paperly.children(key), "note");
       if (!notes.length) {
         return `${item.data.title || key} has no notes.`;
       }

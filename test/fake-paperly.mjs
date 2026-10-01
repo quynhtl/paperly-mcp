@@ -109,6 +109,7 @@ export const LIBRARY = {
         annotationColor: "#5fb236",
         annotationPageLabel: "1",
         annotationSortIndex: "00000|000100|00100",
+        annotationPosition: '{"pageIndex":0,"rects":[[72.1,701.4,180.6,713.9]]}',
         tags: [{ tag: "core" }],
       },
     },
@@ -146,6 +147,8 @@ export const LIBRARY = {
         title: "Scanned chapter",
         contentType: "application/pdf",
         linkMode: "imported_file",
+        // A file can hold a note of its own
+        note: "<p>Pages 40&#8211;62, scanned at the library.</p>",
         tags: [],
         collections: [],
       },
@@ -397,7 +400,10 @@ export function startFakePaperly(options = { enabled: true }) {
       const include = (q.get("include") || "data").split(",");
       const body = { ...item };
       if (include.includes("bib")) {
-        body.bib = `<div class="csl-entry">${item.data.title}. (${q.get("style") || "default"})</div>`;
+        // Only a regular item has a reference: for the others, an empty bibliography
+        body.bib = isRegular(item)
+          ? `<div class="csl-bib-body"><div class="csl-entry">${item.data.title}. (${q.get("style") || "default"})</div></div>`
+          : `<div class="csl-bib-body"></div>`;
       }
       return json(res, 200, body);
     }

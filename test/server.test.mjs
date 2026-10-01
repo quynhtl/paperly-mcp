@@ -259,6 +259,36 @@ describe("the tools", () => {
     assert.match(text, /No item in the library has the key NOPE0000/);
   });
 
+  test("get_item shows how a note begins, as text, and leaves the rest to get_notes", async () => {
+    // About 115,000 characters of HTML
+    const long = await server.call("get_item", { key: "NOTE0002" });
+    assert.equal(long.isError, false);
+    assert.ok(long.text.length < 1000, `${long.text.length} characters`);
+    assert.doesNotMatch(long.text, /</);
+    assert.match(
+      long.text,
+      /\nNote, as it begins:\nParagraph 0: [^…]+…\n\(Read the whole note, \d+ characters, with get_notes and key NOTE0002\.\)$/,
+    );
+    // No reference, and no field holding the note
+    assert.doesNotMatch(long.text, /Reference|note: /);
+
+    const short = await server.call("get_item", { key: "NOTE0004" });
+    assert.match(short.text, /\nType: note\n\nNote:\nReread the madeleine scene\.$/);
+
+    // A file's own note, which get_notes reads too
+    const file = await server.call("get_item", { key: "SOLO0001" });
+    assert.match(file.text, /\nNote:\nPages 40–62, scanned at the library\.$/);
+    const notes = await server.call("get_notes", { key: "SOLO0001" });
+    assert.equal(notes.text, "## Note [SOLO0001]\nPages 40–62, scanned at the library.");
+    const none = await server.call("get_notes", { key: "PDF00001" });
+    assert.equal(none.text, "Full Text PDF has no notes.");
+
+    // Nor where an annotation is on its page
+    const highlight = await server.call("get_item", { key: "ANNO0001" });
+    assert.match(highlight.text, /\nannotationText: The Transformer\n/);
+    assert.doesNotMatch(highlight.text, /annotationPosition|rects/);
+  });
+
   test("get_fulltext reads the PDF in slices", async () => {
     const first = await server.call("get_fulltext", { key: "ATTN0001", length: 1000 });
     assert.match(first.text, /Full text of Full Text PDF \[PDF00001\], characters 0–1000 of \d+; 15 of 15 pages indexed/);

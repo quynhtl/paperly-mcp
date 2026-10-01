@@ -75,6 +75,19 @@ test("an error from Paperly is shortened without cutting a character in half", a
   });
 });
 
+test("how a note begins is never cut in the middle of a character", async () => {
+  // The 𝑥 takes units 299 and 300 of the note's text
+  const note = `<p>${"n".repeat(299)}${String.fromCodePoint(0x1d465)} and more</p>`;
+  const paperly = new Paperly({
+    fetch: async () => new Response(JSON.stringify({ key: "NOTE9999", data: { key: "NOTE9999", itemType: "note", note } })),
+  });
+  const server = new McpServer({ name: "test", log: () => {} });
+  addTools(server, paperly);
+  const { content } = await server.call({ name: "get_item", arguments: { key: "NOTE9999" } });
+  assert.ok(wellFormed(content[0].text));
+  assert.ok(content[0].text.includes(`\nNote, as it begins:\n${"n".repeat(299)}…\n`), content[0].text);
+});
+
 test("a search traces only so many files to their items, and says how many it left", async () => {
   const fake = await startFakePaperly();
   try {
