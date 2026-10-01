@@ -170,6 +170,8 @@ describe("the tools", () => {
   test("collections are listed nested, and their items one per line", async () => {
     const { text } = await server.call("list_collections", {});
     assert.equal(text, "- Thesis [THES0001] (1 items)\n  - Chapter 2 [CHAP0002] (0 items)");
+    // Every collection, however many there are
+    assert.equal(fake.requests.at(-1).searchParams.has("limit"), false);
     const items = await server.call("get_collection_items", { key: "THES0001" });
     assert.match(items.text, /^\[ATTN0001\] Attention Is All You Need/);
     const empty = await server.call("get_collection_items", { key: "CHAP0002" });

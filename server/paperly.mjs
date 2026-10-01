@@ -66,7 +66,8 @@ export class Paperly {
   }
 
   collections() {
-    return this.get("collections", { limit: 500 });
+    // All of them: a list cut short would lose whole subtrees without a word
+    return this.get("collections");
   }
 
   collectionItems(key, { limit = 50 } = {}) {

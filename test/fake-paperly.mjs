@@ -144,6 +144,24 @@ function json(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+/**
+ * A list the way the local API sends one: sorted, then cut to `start` and
+ * `limit`. Without a limit it sends everything. (Its default sort,
+ * dateModified, is the order here, since nothing in the fake has a date
+ * modified.)
+ */
+function list(res, objects, q) {
+  const sort = q.get("sort");
+  if (sort === "title" || sort === "date") {
+    const direction = (q.get("direction") || (sort === "date" ? "desc" : "asc")) === "desc" ? -1 : 1;
+    const field = (o) => o.data[sort] || "";
+    objects = [...objects].sort((a, b) => (field(a) < field(b) ? -direction : field(a) > field(b) ? direction : 0));
+  }
+  const start = Number(q.get("start")) || 0;
+  const limit = Number(q.get("limit")) || objects.length - start;
+  json(res, 200, objects.slice(start, start + limit));
+}
+
 /** Starts the fake on a free port. `options.enabled = false` answers 403, as Paperly does with the API off. */
 export function startFakePaperly(options = { enabled: true }) {
   const requests = [];
@@ -167,7 +185,7 @@ export function startFakePaperly(options = { enabled: true }) {
           .includes(query),
       );
       if (q.get("itemType")) items = items.filter((i) => i.data.itemType === q.get("itemType"));
-      return json(res, 200, items.slice(0, Number(q.get("limit")) || 25));
+      return list(res, items, q);
     }
     if (path === "items" && q.get("format") === "bib") {
       const keys = (q.get("itemKey") || "").split(",");
@@ -198,11 +216,11 @@ export function startFakePaperly(options = { enabled: true }) {
       return json(res, 200, body);
     }
     if (path === "collections") {
-      return json(res, 200, LIBRARY.collections);
+      return list(res, LIBRARY.collections, q);
     }
     if ((m = /^collections\/([A-Z0-9]{8})\/items\/top$/.exec(path))) {
       if (!LIBRARY.collections.some((c) => c.key === m[1])) return json(res, 404, "Not found");
-      return json(res, 200, LIBRARY.items.filter((i) => isTop(i) && i.data.collections?.includes(m[1])));
+      return list(res, LIBRARY.items.filter((i) => isTop(i) && i.data.collections?.includes(m[1])), q);
     }
     json(res, 404, "Not found");
   });
