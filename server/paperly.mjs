@@ -18,6 +18,12 @@ export const DEFAULT_TIMEOUT = 60000;
 // on why it could not get it, not a guess that Paperly is stuck.
 export const STYLE_TIMEOUT = 90000;
 
+// At most this many files a search has Paperly describe to learn whose they
+// are: describing one makes Paperly read the whole file
+export const FILE_LIMIT = 50;
+
+const NEWEST_FIRST = { sort: "date", direction: "desc" };
+
 export class Paperly {
   /**
    * @param {object} [options]
@@ -25,6 +31,7 @@ export class Paperly {
    * @param {string} [options.library] - "users/0" for My Library, or "groups/<id>"
    * @param {number} [options.timeout] - Milliseconds to wait for an answer
    * @param {number} [options.styleTimeout] - The same, for a request that names a citation style
+   * @param {number} [options.fileLimit] - At most this many files a search traces to their items
    */
   constructor({
     apiURL = DEFAULT_API_URL,
@@ -32,12 +39,14 @@ export class Paperly {
     fetch = globalThis.fetch,
     timeout = DEFAULT_TIMEOUT,
     styleTimeout = Math.max(timeout, STYLE_TIMEOUT),
+    fileLimit = FILE_LIMIT,
   } = {}) {
     this.root = apiURL.endsWith("/") ? apiURL : `${apiURL}/`;
     this.library = library;
     this.fetch = fetch;
     this.timeout = timeout;
     this.styleTimeout = styleTimeout;
+    this.fileLimit = fileLimit;
   }
 
   /** GET a path under the library (or, with `absolute`, under /api/). */
@@ -89,48 +98,98 @@ export class Paperly {
   }
 
   /**
-   * Top-level items that match, newest first. Searching "everything" also
-   * matches inside the full text of files, notes and annotations, but then
-   * Paperly answers with the file, note or annotation itself -- which
-   * items/top leaves out -- so that search runs over every item, and what it
-   * lists are the items the matches belong to.
+   * Top-level items that match, newest first, as { items, untraced }.
+   *
+   * Searching "everything" also matches inside the full text of files, notes
+   * and annotations, but then Paperly answers with the file, note or
+   * annotation itself -- which items/top leaves out -- so that search runs
+   * over every item, and what it lists are the items the matches belong to.
+   *
+   * Paperly describes a stored file only with its MD5 hash, and reads the
+   * whole file to compute it, so a broad search that had it describe every
+   * match would have it read gigabytes of PDFs. The matches are gathered as
+   * bare keys instead, which cost it nothing to list; only notes and
+   * annotations whose item is not already known are described, and files only
+   * when nothing else says whose they are -- at most `fileLimit` of them.
+   * `untraced` counts the files left over.
    */
   async search({ query, mode = "titleCreatorYear", limit = 15, itemType, tag }) {
-    const newestFirst = { sort: "date", direction: "desc" };
     if (mode !== "everything") {
-      return this.get("items/top", { q: query, qmode: mode, limit, itemType, tag, ...newestFirst });
+      const items = await this.get("items/top", { q: query, qmode: mode, limit, itemType, tag, ...NEWEST_FIRST });
+      return { items: items || [], untraced: 0 };
     }
-    const matches = (await this.get("items", { q: query, qmode: mode })) || [];
-    const byKey = new Map(matches.map((item) => [item.key, item]));
-    // An annotation's parent is a file, which may itself have a parent
-    const files = new Set(
-      matches
-        .filter((item) => item.data.itemType === "annotation" && !byKey.has(item.data.parentItem))
-        .map((item) => item.data.parentItem),
-    );
-    if (files.size) {
-      for (const file of (await this.get("items", { itemKey: [...files].join(","), itemType: "attachment" })) || []) {
-        byKey.set(file.key, file);
+    const found = { q: query, qmode: mode };
+    // Every match, with the files and notes of each
+    const matches = await this.keys("items", found);
+    if (!matches.length) {
+      return { items: [], untraced: 0 };
+    }
+    const top = await this.keys("items/top", found);
+    const owners = new Set(top);
+    let rest = matches.filter((key) => !owners.has(key));
+    if (rest.length && top.length) {
+      // What matched inside a top-level match adds nothing to it. itemType
+      // narrows through a scope that includes children, so this lists the
+      // files, notes and annotations of the top-level matches.
+      const theirs = new Set(await this.keys("items/top", { ...found, itemType: "attachment || note || annotation" }));
+      rest = rest.filter((key) => !theirs.has(key));
+    }
+    const files = new Set();
+    if (rest.length) {
+      const isFile = new Set(await this.keys("items", { ...found, itemType: "attachment" }));
+      const others = [];
+      for (const key of rest) {
+        if (isFile.has(key)) {
+          files.add(key);
+        } else {
+          others.push(key);
+        }
+      }
+      if (others.length) {
+        // A note names its item; an annotation, its file. Never a file here.
+        for (const part of (await this.get("items", { itemKey: others.join(","), itemType: "note || annotation" })) || []) {
+          if (part.data.itemType === "annotation") {
+            files.add(part.data.parentItem);
+          } else {
+            owners.add(part.data.parentItem || part.key);
+          }
+        }
       }
     }
-    const topKey = (item) => {
-      if (!item.data.parentItem) {
-        return item.key;
+    const traced = [...files].slice(0, this.fileLimit);
+    if (traced.length) {
+      // A file stands alone or names its item
+      for (const file of (await this.get("items", { itemKey: traced.join(","), itemType: "attachment" })) || []) {
+        owners.add(file.data.parentItem || file.key);
       }
-      if (item.data.itemType !== "annotation") {
-        return item.data.parentItem;
-      }
-      const file = byKey.get(item.data.parentItem);
-      return file && (file.data.parentItem || file.key);
-    };
-    const keys = new Set(matches.map(topKey).filter(Boolean));
-    if (!keys.size) {
-      return [];
     }
-    const items = await this.get("items/top", { itemKey: [...keys].join(","), itemType, tag, ...newestFirst });
-    // itemType and tag also look among the children of the items they narrow,
-    // so a child can come back with them; the limit counts only items
-    return (items || []).filter((item) => !item.data.parentItem).slice(0, limit);
+    return { items: await this.newest([...owners], { limit, itemType, tag }), untraced: files.size - traced.length };
+  }
+
+  /** The keys of what a list request finds: Paperly lists them without describing anything. */
+  async keys(path, params) {
+    const text = await this.get(path, { ...params, format: "keys" }, { as: "text" });
+    return (text || "").split("\n").filter(Boolean);
+  }
+
+  /**
+   * The items with these keys, newest first, narrowed by itemType and tag.
+   * Those also look among the children of the items they narrow, so a child
+   * can come back with them; the limit counts only items, so the answer is
+   * read a page at a time until the limit is reached, and Paperly describes
+   * no more than a page.
+   */
+  async newest(keys, { limit, itemType, tag }) {
+    const items = [];
+    for (let start = 0; keys.length && items.length < limit; start += limit) {
+      const page =
+        (await this.get("items/top", { itemKey: keys.join(","), itemType, tag, limit, start, ...NEWEST_FIRST })) || [];
+      items.push(...page.filter((item) => !item.data.parentItem));
+      if (page.length < limit) {
+        break;
+      }
+    }
+    return items.slice(0, limit);
   }
 
   item(key, { style } = {}) {

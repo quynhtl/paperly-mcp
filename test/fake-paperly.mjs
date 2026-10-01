@@ -1,7 +1,9 @@
 // A stand-in for Paperly's local API with a small library in it, enough to
 // exercise every tool. Answers as the real one does, quirks included: JSON for
-// data, HTML for format=bib, 404 for an unknown item or collection, 403 when
-// the API is "turned off".
+// data, HTML for format=bib, bare keys for format=keys, 404 for an unknown
+// item or collection, 403 when the API is "turned off". It also notes each
+// stored file it describes in JSON, which costs the real one a read of the
+// whole file for its MD5 hash.
 import http from "node:http";
 
 const pdfText = `${Array.from({ length: 2500 }, (_, i) => `Sentence ${i} of the paper about attention.`).join(" ")} Positions are encoded with sinusoids.`;
@@ -254,6 +256,16 @@ function searchedText(item, mode) {
   return fields.filter(Boolean).join(" ").toLowerCase();
 }
 
+/**
+ * A filter in the API's search syntax: "a || b" for either, "-a" for not a,
+ * and "-a || b" for not a or not b, as buildSearchFromSearchSyntax reads it.
+ */
+function syntax(value, test) {
+  const negate = value.startsWith("-");
+  const ors = (negate ? value.slice(1) : value).split("||").map((or) => or.trim());
+  return (item) => ors.some((or) => test(item, or) !== negate);
+}
+
 /** items and items/top, searched the way LocalAPI.Items builds its search. */
 function searchItems(top, q) {
   let items = LIBRARY.items.filter((i) => !top || isTop(i));
@@ -281,10 +293,10 @@ function searchItems(top, q) {
   // itemType and tag each narrow the search through a scope that includes
   // children, so a child of an item found so far can come back too
   if (q.get("itemType")) {
-    items = withChildren(items).filter((i) => i.data.itemType === q.get("itemType"));
+    items = withChildren(items).filter(syntax(q.get("itemType"), (i, type) => i.data.itemType === type));
   }
   if (q.get("tag")) {
-    items = withChildren(items).filter((i) => (i.data.tags || []).some((t) => t.tag === q.get("tag")));
+    items = withChildren(items).filter(syntax(q.get("tag"), (i, tag) => (i.data.tags || []).some((t) => t.tag === tag)));
   }
   return items;
 }
@@ -294,13 +306,16 @@ function json(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+/** Whether describing the object makes Paperly hash a file (Item.toResponseJSONAsync). */
+const storedFile = (o) => o.data?.itemType === "attachment" && o.data.linkMode?.startsWith("imported");
+
 /**
  * A list the way the local API sends one: sorted, then cut to `start` and
- * `limit`. Without a limit it sends everything. (Its default sort,
- * dateModified, is the order here, since nothing in the fake has a date
- * modified.)
+ * `limit`, and only then described, or with format=keys only named. Without
+ * a limit it sends everything. (Its default sort, dateModified, is the order
+ * here, since nothing in the fake has a date modified.)
  */
-function list(res, objects, q) {
+function list(res, objects, q, hashed) {
   const sort = q.get("sort");
   if (sort === "title" || sort === "date") {
     const direction = (q.get("direction") || (sort === "date" ? "desc" : "asc")) === "desc" ? -1 : 1;
@@ -309,16 +324,25 @@ function list(res, objects, q) {
   }
   const start = Number(q.get("start")) || 0;
   const limit = Number(q.get("limit")) || objects.length - start;
-  json(res, 200, objects.slice(start, start + limit));
+  objects = objects.slice(start, start + limit);
+  if (q.get("format") === "keys") {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end(objects.map((o) => o.key).join("\n"));
+    return;
+  }
+  hashed.push(...objects.filter(storedFile).map((o) => o.key));
+  json(res, 200, objects);
 }
 
 /**
- * Starts the fake on a free port. `options.enabled = false` answers 403, as
- * Paperly does with the API off; `options.delay` waits that many milliseconds
- * before answering, as a busy or stuck Paperly does.
+ * Starts the fake on a free port. `requests` collects the URLs asked for, and
+ * `hashed` the keys of the stored files described. `options.enabled = false`
+ * answers 403, as Paperly does with the API off; `options.delay` waits that
+ * many milliseconds before answering, as a busy or stuck Paperly does.
  */
 export function startFakePaperly(options = { enabled: true }) {
   const requests = [];
+  const hashed = [];
   const timers = new Set();
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, "http://localhost");
@@ -354,11 +378,11 @@ export function startFakePaperly(options = { enabled: true }) {
       return;
     }
     if (path === "items" || path === "items/top") {
-      return list(res, searchItems(path === "items/top", q), q);
+      return list(res, searchItems(path === "items/top", q), q, hashed);
     }
     if ((m = /^items\/([A-Z0-9]{8})\/children$/.exec(path))) {
       // Files and notes: an annotation is no child of its file here
-      return list(res, LIBRARY.items.filter((i) => i.data.parentItem === m[1] && i.data.itemType !== "annotation"), q);
+      return list(res, LIBRARY.items.filter((i) => i.data.parentItem === m[1] && i.data.itemType !== "annotation"), q, hashed);
     }
     if ((m = /^items\/([A-Z0-9]{8})\/fulltext$/.exec(path))) {
       const fulltext = LIBRARY.fulltext[m[1]];
@@ -367,6 +391,9 @@ export function startFakePaperly(options = { enabled: true }) {
     if ((m = /^items\/([A-Z0-9]{8})$/.exec(path))) {
       const item = LIBRARY.items.find((i) => i.key === m[1]);
       if (!item) return json(res, 404, "Not found");
+      if (storedFile(item)) {
+        hashed.push(item.key);
+      }
       const include = (q.get("include") || "data").split(",");
       const body = { ...item };
       if (include.includes("bib")) {
@@ -375,7 +402,7 @@ export function startFakePaperly(options = { enabled: true }) {
       return json(res, 200, body);
     }
     if (path === "collections") {
-      return list(res, LIBRARY.collections, q);
+      return list(res, LIBRARY.collections, q, hashed);
     }
     if ((m = /^collections\/([A-Z0-9]{8})$/.exec(path))) {
       const collection = LIBRARY.collections.find((c) => c.key === m[1]);
@@ -385,7 +412,7 @@ export function startFakePaperly(options = { enabled: true }) {
       // Paperly drops the condition on a collection it cannot find, and so lists
       // every top-level item in the library
       const known = LIBRARY.collections.some((c) => c.key === m[1]);
-      return list(res, LIBRARY.items.filter((i) => isTop(i) && (!known || i.data.collections?.includes(m[1]))), q);
+      return list(res, LIBRARY.items.filter((i) => isTop(i) && (!known || i.data.collections?.includes(m[1]))), q, hashed);
     }
     json(res, 404, "Not found");
   };
@@ -399,7 +426,7 @@ export function startFakePaperly(options = { enabled: true }) {
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
       const { port } = server.address();
-      resolve({ url: `http://127.0.0.1:${port}/api/`, requests, options, close });
+      resolve({ url: `http://127.0.0.1:${port}/api/`, requests, hashed, options, close });
     });
   });
 }

@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ToolError } from "../server/mcp.mjs";
+import { McpServer, ToolError } from "../server/mcp.mjs";
 import { Paperly } from "../server/paperly.mjs";
+import { addTools } from "../server/tools.mjs";
 import { startFakePaperly } from "./fake-paperly.mjs";
 import { wellFormed } from "./helpers.mjs";
 
@@ -72,4 +73,26 @@ test("an error from Paperly is shortened without cutting a character in half", a
     assert.ok(wellFormed(e.message));
     return true;
   });
+});
+
+test("a search traces only so many files to their items, and says how many it left", async () => {
+  const fake = await startFakePaperly();
+  try {
+    const paperly = new Paperly({ apiURL: fake.url, fileLimit: 1 });
+    // Both PDFs are titled "Full Text PDF", and neither paper matches on its own
+    const { items, untraced } = await paperly.search({ query: "full text pdf", mode: "everything" });
+    assert.equal(items.length, 1);
+    assert.equal(untraced, 1);
+    assert.equal(fake.hashed.length, 1);
+
+    const server = new McpServer({ name: "test", log: () => {} });
+    addTools(server, paperly);
+    const { content } = await server.call({ name: "search_library", arguments: { query: "full text pdf", mode: "everything" } });
+    assert.match(
+      content[0].text,
+      /^1 item\(s\) match “full text pdf”:\n\[[A-Z0-9]{8}\] .*\n\n\(The words are also in the text or highlights of 1 more file\(s\), not traced/,
+    );
+  } finally {
+    await fake.close();
+  }
 });

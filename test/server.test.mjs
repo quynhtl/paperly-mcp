@@ -150,6 +150,29 @@ describe("the tools", () => {
     assert.match(await search({ query: "attention" }), /^1 item\(s\) match/);
   });
 
+  test("search_library has Paperly read no file it does not need to", async () => {
+    // Paperly reads a stored file whole for its MD5 hash whenever it describes one
+    const hashedBy = async (query) => {
+      const before = fake.hashed.length;
+      const requests = fake.requests.length;
+      const { isError } = await server.call("search_library", { query, mode: "everything" });
+      assert.equal(isError, false);
+      // The matches themselves only ever come back as keys
+      for (const url of fake.requests.slice(requests).filter((u) => u.searchParams.has("q"))) {
+        assert.equal(url.searchParams.get("format"), "keys", url.search);
+      }
+      return fake.hashed.slice(before);
+    };
+    // The paper matches by its title, so its PDF, though its text matches too, is not described
+    assert.deepEqual(await hashedBy("attention"), []);
+    // Only the PDF's text matches: that file, to learn whose it is
+    assert.deepEqual(await hashedBy("sinusoids"), ["PDF00001"]);
+    // 300 highlights in one book: their file, once
+    assert.deepEqual(await hashedBy("words"), ["EPUB0001"]);
+    // A note names its item itself
+    assert.deepEqual(await hashedBy("madeleine"), []);
+  });
+
   test("search_library filters and orders what everything finds by the items themselves", async () => {
     const search = async (args) => (await server.call("search_library", { mode: "everything", ...args })).text;
     // Both PDFs are titled "Full Text PDF": newest paper first
@@ -157,7 +180,15 @@ describe("the tools", () => {
     assert.match(both, /^2 item\(s\) match .*\n\[MATH0001\] .*\n\[ATTN0001\] /);
     assert.equal(fake.requests.at(-1).pathname, "/api/users/0/items/top");
     assert.equal(fake.requests.at(-1).searchParams.get("sort"), "date");
+    // Paperly describes no more items than are asked for
+    assert.equal(fake.requests.at(-1).searchParams.get("limit"), "15");
     assert.match(await search({ query: "full text pdf", limit: 1 }), /^1 item\(s\) match .*\n\[MATH0001\] /);
+    // A filter can bring back children, which the limit does not count: the
+    // answer is read a page at a time until the limit is reached or it ends
+    const requests = fake.requests.length;
+    assert.match(await search({ query: "full text pdf", limit: 1, itemType: "attachment" }), /Nothing in the library matches/);
+    const pages = fake.requests.slice(requests).filter((u) => u.searchParams.get("sort") === "date");
+    assert.deepEqual(pages.map((u) => [u.searchParams.get("start"), u.searchParams.get("limit")]), [["0", "1"], ["1", "1"], ["2", "1"]]);
     assert.match(await search({ query: "full text pdf", itemType: "book" }), /Nothing in the library matches/);
     assert.match(await search({ query: "transformer", tag: "transformers" }), /\n\[ATTN0001\] /);
     // The tag is on the paper's highlight, not on the paper, which is what the filter is for

@@ -153,11 +153,19 @@ export function addTools(server, paperly) {
     },
     annotations: READ_ONLY,
     async run({ query, mode, limit = 15, itemType, tag }) {
-      const items = await paperly.search({ query, mode, limit, itemType, tag });
-      if (!items?.length) {
+      const { items, untraced } = await paperly.search({ query, mode, limit, itemType, tag });
+      if (!items.length && !untraced) {
         return `Nothing in the library matches “${query}”.`;
       }
-      return [`${items.length} item(s) match “${query}”:`, ...items.map(itemLine)].join("\n");
+      const lines = [`${items.length} item(s) match “${query}”:`, ...items.map(itemLine)];
+      if (untraced) {
+        lines.push(
+          "",
+          `(The words are also in the text or highlights of ${untraced} more file(s), not traced to their items: ` +
+            "there were too many to look up. More specific words would bring them in.)",
+        );
+      }
+      return lines.join("\n");
     },
   });
 
