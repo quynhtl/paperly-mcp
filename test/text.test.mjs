@@ -9,6 +9,15 @@ test("HTML keeps its words and line breaks, and loses its tags", () => {
   assert.equal(htmlToText(null), "");
 });
 
+test("a numeric reference that is no character reads as U+FFFD, as in a browser", () => {
+  assert.equal(htmlToText("<p>&#x1D465; &#119909;</p>"), "𝑥 𝑥");
+  assert.equal(htmlToText("<p>a &#x110000; b &#99999999999999999999; c</p>"), "a \ufffd b \ufffd c");
+  // Half a surrogate pair would leave a string that is not well-formed
+  assert.equal(htmlToText("&#xD835;&#56421;"), "\ufffd\ufffd");
+  // Only digits make a number
+  assert.equal(htmlToText("&#12ab; &#x;"), "&#12ab; &#x;");
+});
+
 test("creators shorten the way a reference list would", () => {
   const people = (...names) => names.map((lastName) => ({ creatorType: "author", lastName }));
   assert.equal(shortCreators(people("Smith")), "Smith");

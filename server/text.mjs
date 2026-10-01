@@ -10,10 +10,13 @@ export function htmlToText(html) {
     .replace(/<\/(p|div|h[1-6]|li|blockquote|tr)>/gi, "\n")
     .replace(/<li[^>]*>/gi, "• ")
     .replace(/<[^>]+>/g, "")
-    .replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, entity) => {
+    .replace(/&(#[0-9]+|#x[0-9a-f]+|[a-z]+);/gi, (match, entity) => {
       if (entity[0] === "#") {
         const code = entity[1].toLowerCase() === "x" ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1), 10);
-        return Number.isFinite(code) ? String.fromCodePoint(code) : match;
+        // As in a browser, a number that is no character -- past U+10FFFF, or half
+        // of a surrogate pair -- reads as U+FFFD. fromCodePoint would throw on the
+        // first, and the second would leave text the model's API refuses.
+        return code <= 0x10ffff && (code < 0xd800 || code > 0xdfff) ? String.fromCodePoint(code) : "\ufffd";
       }
       return ENTITIES[entity.toLowerCase()] ?? match;
     })
