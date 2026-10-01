@@ -12,7 +12,7 @@ test("a Paperly that takes a request and never answers is given up on", async ()
     const started = Date.now();
     await assert.rejects(paperly.get("items/top"), (e) => {
       assert.ok(e instanceof ToolError);
-      assert.match(e.message, /^Paperly is not responding: .* within 0\.3 seconds/);
+      assert.match(e.message, /^Paperly took the request but did not answer within 0\.3 seconds\. It may only be busy/);
       return true;
     });
     assert.ok(Date.now() - started < 5000);
@@ -39,9 +39,26 @@ test("an answer that is slow to arrive is given up on too", async () => {
   // before the timeout fired
   const alive = setInterval(() => {}, 1000);
   try {
-    await assert.rejects(paperly.get("items"), /^Error: Paperly is not responding/);
+    await assert.rejects(paperly.get("items"), /^Error: Paperly took the request but did not answer/);
   } finally {
     clearInterval(alive);
+  }
+});
+
+test("a request that names a citation style waits out Paperly's download of it", async () => {
+  // Paperly allows itself 30 seconds for each of two downloads
+  assert.equal(new Paperly().timeout, 60_000);
+  assert.equal(new Paperly().styleTimeout, 90_000);
+  const fake = await startFakePaperly({ enabled: true, delay: 600 });
+  try {
+    const paperly = new Paperly({ apiURL: fake.url, timeout: 300, styleTimeout: 3000 });
+    const item = await paperly.item("ATTN0001", { style: "harvard-anglia-ruskin-university" });
+    assert.match(item.bib, /harvard-anglia-ruskin-university/);
+    const bibliography = await paperly.bibliography(["ATTN0001"], { style: "nature" });
+    assert.match(bibliography, /Vaswani/);
+    await assert.rejects(paperly.collections(), /within 0\.3 seconds/);
+  } finally {
+    await fake.close();
   }
 });
 

@@ -7,9 +7,16 @@ import { charBoundary } from "./text.mjs";
 export const DEFAULT_API_URL = "http://127.0.0.1:23119/api/";
 
 // A request Paperly has taken but not answered in this long counts as lost.
-// Paperly answers in milliseconds when it is well; when it is stuck, fetch
-// alone would wait five minutes, and the conversation with it.
-export const DEFAULT_TIMEOUT = 15000;
+// Paperly answers in milliseconds when it is well, though a search through the
+// text of every file in a large library takes it a while; when it is stuck,
+// fetch alone would wait five minutes, and the conversation with it.
+export const DEFAULT_TIMEOUT = 60000;
+
+// A request that names a citation style can make Paperly download the style,
+// and then the style that one depends on, allowing itself 30 seconds for each.
+// Waiting longer than both means the answer is the style or Paperly's own word
+// on why it could not get it, not a guess that Paperly is stuck.
+export const STYLE_TIMEOUT = 90000;
 
 export class Paperly {
   /**
@@ -17,17 +24,20 @@ export class Paperly {
    * @param {string} [options.apiURL] - The local API's root, ending in /api/
    * @param {string} [options.library] - "users/0" for My Library, or "groups/<id>"
    * @param {number} [options.timeout] - Milliseconds to wait for an answer
+   * @param {number} [options.styleTimeout] - The same, for a request that names a citation style
    */
   constructor({
     apiURL = DEFAULT_API_URL,
     library = "users/0",
     fetch = globalThis.fetch,
     timeout = DEFAULT_TIMEOUT,
+    styleTimeout = Math.max(timeout, STYLE_TIMEOUT),
   } = {}) {
     this.root = apiURL.endsWith("/") ? apiURL : `${apiURL}/`;
     this.library = library;
     this.fetch = fetch;
     this.timeout = timeout;
+    this.styleTimeout = styleTimeout;
   }
 
   /** GET a path under the library (or, with `absolute`, under /api/). */
@@ -38,11 +48,15 @@ export class Paperly {
         url.searchParams.set(name, String(value));
       }
     }
-    const signal = AbortSignal.timeout(this.timeout);
+    const timeout = params.style ? this.styleTimeout : this.timeout;
+    const signal = AbortSignal.timeout(timeout);
+    // Most likely Paperly is still at work and will finish: the advice to
+    // restart is for when nothing gets an answer
     const notResponding = () =>
       new ToolError(
-        `Paperly is not responding: it took the request but did not answer within ${this.timeout / 1000} seconds. ` +
-          "It may be busy; try again in a moment, and if it stays like this, restart Paperly.",
+        `Paperly took the request but did not answer within ${timeout / 1000} seconds. ` +
+          "It may only be busy, downloading a citation style it did not have for instance, and finish on its own; " +
+          "try again in a moment. If even a simple search gets no answer, Paperly is stuck: restart it.",
       );
     let response;
     try {
