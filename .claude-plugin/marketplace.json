@@ -1,0 +1,15 @@
+{
+  "name": "paperly",
+  "description": "Paperly's plugins for Claude",
+  "owner": {
+    "name": "quynhtl",
+    "url": "https://github.com/quynhtl"
+  },
+  "plugins": [
+    {
+      "name": "paperly",
+      "source": "./",
+      "description": "Read your Paperly library from Claude: search, full text, highlights, notes and references."
+    }
+  ]
+}

@@ -5,8 +5,8 @@ Claude. Ask Claude to find the papers you saved, summarise what you highlighted,
 read a paper's full text, or put together a reference list, and it answers from
 your own library instead of from memory.
 
-It is a local MCP server. Everything is read-only: it never changes your
-library.
+The plugin adds a local MCP server and a skill that tells Claude how to use it.
+Everything is read-only: it never changes your library.
 
 ## What Claude can do with it
 
@@ -26,11 +26,17 @@ library.
 1. **Turn on Paperly's local API.** In Paperly, open **Settings → Advanced** and
    tick **Allow other applications on this computer to communicate with
    Paperly**. Paperly has to be open while Claude uses the library.
-2. **Add the server to Claude Code**, from a copy of this repository:
+2. **Install the plugin** in Claude Code:
 
    ```sh
-   claude mcp add paperly -- node /path/to/paperly-mcp/server/index.mjs
+   claude plugin marketplace add quynhtl/paperly-mcp
+   claude plugin install paperly@paperly
    ```
+
+   or try it from a copy of this repository with
+   `claude --plugin-dir ./paperly-mcp`. Without the plugin, the server alone
+   can be added with
+   `claude mcp add paperly -- node /path/to/paperly-mcp/server/index.mjs`.
 
 The server needs Node.js 18 or later and nothing else: it has no dependencies,
 so nothing is downloaded when you install it.
@@ -41,14 +47,14 @@ the server looks for Paperly (default `http://127.0.0.1:23119/api/`).
 
 ## Privacy policy
 
-**What the server reads.** Only what Claude asks for through the tools above:
+**What the plugin reads.** Only what Claude asks for through the tools above:
 item metadata, abstracts, notes, highlights and comments, and the full text
 Paperly has extracted from your files. It reads them from Paperly's local API on
 your own computer (`127.0.0.1`).
 
 **Where it goes.** What a tool returns becomes part of your conversation with
 Claude, and is handled under the terms of your Claude account, like anything
-else you share in a conversation. The server itself sends nothing anywhere
+else you share in a conversation. The plugin itself sends nothing anywhere
 else: it makes no network requests other than to Paperly on your computer.
 
 **What it keeps.** Nothing. It has no storage, no logs beyond Claude's own, no
