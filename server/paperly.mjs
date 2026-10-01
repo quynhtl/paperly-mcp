@@ -163,7 +163,7 @@ export class Paperly {
         owners.add(file.data.parentItem || file.key);
       }
     }
-    return { items: await this.newest([...owners], { limit, itemType, tag }), untraced: files.size - traced.length };
+    return { items: await this.newest(owners, { limit, itemType, tag }), untraced: files.size - traced.length };
   }
 
   /** The keys of what a list request finds: Paperly lists them without describing anything. */
@@ -173,23 +173,28 @@ export class Paperly {
   }
 
   /**
-   * The items with these keys, newest first, narrowed by itemType and tag.
-   * Those also look among the children of the items they narrow, so a child
-   * can come back with them; the limit counts only items, so the answer is
-   * read a page at a time until the limit is reached, and Paperly describes
-   * no more than a page.
+   * The newest `limit` of the top-level items `owners`, narrowed by itemType
+   * and tag.
+   *
+   * Those two narrow through a scope that includes children, so the filtered
+   * list also holds the files, notes and annotations of the owners -- every
+   * child PDF of every owner, filtered to attachments. Described, each stored
+   * file among them would cost Paperly a read of the whole file, and none of
+   * them is an answer. So the filtered list comes back as bare keys, sorted,
+   * the children are dropped by key, and only the items that make the answer
+   * are described, asked for by key with no filter, which brings no child.
    */
-  async newest(keys, { limit, itemType, tag }) {
-    const items = [];
-    for (let start = 0; keys.length && items.length < limit; start += limit) {
-      const page =
-        (await this.get("items/top", { itemKey: keys.join(","), itemType, tag, limit, start, ...NEWEST_FIRST })) || [];
-      items.push(...page.filter((item) => !item.data.parentItem));
-      if (page.length < limit) {
-        break;
-      }
+  async newest(owners, { limit, itemType, tag }) {
+    // Without keys, the request would list the whole library
+    if (!owners.size) {
+      return [];
     }
-    return items.slice(0, limit);
+    const sorted = await this.keys("items/top", { itemKey: [...owners].join(","), itemType, tag, ...NEWEST_FIRST });
+    const chosen = sorted.filter((key) => owners.has(key)).slice(0, limit);
+    if (!chosen.length) {
+      return [];
+    }
+    return (await this.get("items/top", { itemKey: chosen.join(","), ...NEWEST_FIRST })) || [];
   }
 
   item(key, { style } = {}) {

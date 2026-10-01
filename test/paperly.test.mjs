@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { McpServer, ToolError } from "../server/mcp.mjs";
 import { Paperly } from "../server/paperly.mjs";
 import { addTools } from "../server/tools.mjs";
-import { startFakePaperly } from "./fake-paperly.mjs";
+import { LIBRARY, startFakePaperly } from "./fake-paperly.mjs";
 import { wellFormed } from "./helpers.mjs";
 
 test("a Paperly that takes a request and never answers is given up on", async () => {
@@ -93,6 +93,35 @@ test("a search traces only so many files to their items, and says how many it le
       /^1 item\(s\) match “full text pdf”:\n\[[A-Z0-9]{8}\] .*\n\n\(The words are also in the text or highlights of 1 more file\(s\), not traced/,
     );
   } finally {
+    await fake.close();
+  }
+});
+
+test("a filter that also finds every paper's PDF has Paperly read none of them", async () => {
+  // 200 papers with the words in their titles, each with a stored PDF, and one PDF on its own
+  const item = (key, data) => ({ key, meta: {}, data: { key, tags: [], ...data } });
+  const added = [];
+  for (let i = 0; i < 200; i++) {
+    const n = String(i).padStart(6, "0");
+    added.push(
+      item(`QP${n}`, { itemType: "journalArticle", title: `Quantum paper ${i}`, date: "2021" }),
+      item(`QF${n}`, { itemType: "attachment", parentItem: `QP${n}`, title: "Full Text PDF", linkMode: "imported_url" }),
+    );
+  }
+  added.push(item("QS000001", { itemType: "attachment", title: "Quantum notes", linkMode: "imported_file" }));
+  const length = LIBRARY.items.length;
+  LIBRARY.items.push(...added);
+  const fake = await startFakePaperly();
+  try {
+    const paperly = new Paperly({ apiURL: fake.url });
+    const { items } = await paperly.search({ query: "quantum", mode: "everything", limit: 5, itemType: "attachment" });
+    assert.deepEqual(items.map((item) => item.key), ["QS000001"]);
+    // The PDF the answer lists, and none of the 200 that belong to the papers
+    assert.deepEqual(fake.hashed, ["QS000001"]);
+    // However many children the filter finds, they are dropped in one list of keys
+    assert.ok(fake.requests.length <= 6, fake.requests.join("\n"));
+  } finally {
+    LIBRARY.items.splice(length);
     await fake.close();
   }
 });

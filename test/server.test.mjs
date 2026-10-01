@@ -178,17 +178,35 @@ describe("the tools", () => {
     // Both PDFs are titled "Full Text PDF": newest paper first
     const both = await search({ query: "full text pdf" });
     assert.match(both, /^2 item\(s\) match .*\n\[MATH0001\] .*\n\[ATTN0001\] /);
+    // Paperly describes the items of the answer and nothing else
     assert.equal(fake.requests.at(-1).pathname, "/api/users/0/items/top");
     assert.equal(fake.requests.at(-1).searchParams.get("sort"), "date");
-    // Paperly describes no more items than are asked for
-    assert.equal(fake.requests.at(-1).searchParams.get("limit"), "15");
+    assert.equal(fake.requests.at(-1).searchParams.get("itemKey"), "MATH0001,ATTN0001");
     assert.match(await search({ query: "full text pdf", limit: 1 }), /^1 item\(s\) match .*\n\[MATH0001\] /);
-    // A filter can bring back children, which the limit does not count: the
-    // answer is read a page at a time until the limit is reached or it ends
-    const requests = fake.requests.length;
-    assert.match(await search({ query: "full text pdf", limit: 1, itemType: "attachment" }), /Nothing in the library matches/);
-    const pages = fake.requests.slice(requests).filter((u) => u.searchParams.get("sort") === "date");
-    assert.deepEqual(pages.map((u) => [u.searchParams.get("start"), u.searchParams.get("limit")]), [["0", "1"], ["1", "1"], ["2", "1"]]);
+    assert.equal(fake.requests.at(-1).searchParams.get("itemKey"), "MATH0001");
+
+    // A filter also finds the files, notes and highlights of the items it
+    // narrows: the filtered list only ever comes back as keys, so Paperly
+    // reads none of those files, and none of them is listed
+    const filtered = async (args) => {
+      const requests = fake.requests.length;
+      const hashed = fake.hashed.length;
+      const text = await search(args);
+      for (const url of fake.requests.slice(requests).filter((u) => u.searchParams.get("sort") === "date")) {
+        const filter = url.searchParams.has("itemType") || url.searchParams.has("tag");
+        assert.equal(url.searchParams.get("format"), filter ? "keys" : null, url.search);
+      }
+      return { text, hashed: fake.hashed.slice(hashed) };
+    };
+    // Both papers have a stored PDF, and only those PDFs have the words: Paperly
+    // reads them once, to learn whose they are, and no more
+    const files = await filtered({ query: "full text pdf", limit: 1, itemType: "attachment" });
+    assert.match(files.text, /Nothing in the library matches/);
+    assert.deepEqual(files.hashed, ["PDF00001", "PDF00002"]);
+    // A file that stands alone is an item: it alone is read, for its line in the answer
+    const solo = await filtered({ query: "an", itemType: "attachment" });
+    assert.match(solo.text, /^1 item\(s\) match “an”:\n\[SOLO0001\] Scanned chapter/);
+    assert.deepEqual(solo.hashed, ["SOLO0001"]);
     assert.match(await search({ query: "full text pdf", itemType: "book" }), /Nothing in the library matches/);
     assert.match(await search({ query: "transformer", tag: "transformers" }), /\n\[ATTN0001\] /);
     // The tag is on the paper's highlight, not on the paper, which is what the filter is for
