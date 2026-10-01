@@ -134,6 +134,35 @@ describe("the tools", () => {
     assert.equal(fake.requests.at(-1).searchParams.get("qmode"), "everything");
   });
 
+  test("search_library filters by item type and tag without listing files, notes or highlights", async () => {
+    const search = async (args) => {
+      const requests = fake.requests.length;
+      const hashed = fake.hashed.length;
+      const { text } = await server.call("search_library", args);
+      // A filter brings in the children of the matches, so the filtered list only ever comes back as keys
+      for (const url of fake.requests.slice(requests)) {
+        if (url.searchParams.has("itemType") || url.searchParams.has("tag")) {
+          assert.equal(url.searchParams.get("format"), "keys", url.search);
+        }
+      }
+      // and Paperly reads no file but one the answer lists
+      assert.deepEqual(fake.hashed.slice(hashed), text.includes("[SOLO0001]") ? ["SOLO0001"] : [], text);
+      return text;
+    };
+    assert.match(await search({ query: "attention", tag: "transformers" }), /^1 item\(s\) match .*\n\[ATTN0001\] /);
+    assert.match(await search({ query: "deep", itemType: "book" }), /^1 item\(s\) match .*\n\[BOOK0001\] /);
+    // The tag is on a highlight, the PDF and the note are the paper's: none of them is an item that matches
+    assert.match(await search({ query: "attention", tag: "core" }), /Nothing in the library matches/);
+    assert.match(await search({ query: "attention", itemType: "attachment" }), /Nothing in the library matches/);
+    assert.match(await search({ query: "attention", itemType: "note" }), /Nothing in the library matches/);
+    // "Not a book" finds the paper, and only the paper, however many children it has
+    assert.equal(await search({ query: "attention", itemType: "-book" }), await search({ query: "attention" }));
+    // A file that stands alone is an item
+    assert.match(await search({ query: "scanned", itemType: "attachment" }), /^1 item\(s\) match .*\n\[SOLO0001\] /);
+    // Nothing to filter
+    assert.match(await search({ query: "quantum", tag: "core" }), /Nothing in the library matches/);
+  });
+
   test("search_library finds the item whose PDF, note or highlight has the words", async () => {
     const search = async (args) => (await server.call("search_library", { mode: "everything", ...args })).text;
     // Only in the PDF's full text

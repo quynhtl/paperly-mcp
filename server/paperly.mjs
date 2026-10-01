@@ -114,11 +114,19 @@ export class Paperly {
    * `untraced` counts the files left over.
    */
   async search({ query, mode = "titleCreatorYear", limit = 15, itemType, tag }) {
-    if (mode !== "everything") {
-      const items = await this.get("items/top", { q: query, qmode: mode, limit, itemType, tag, ...NEWEST_FIRST });
-      return { items: items || [], untraced: 0 };
-    }
     const found = { q: query, qmode: mode };
+    if (mode !== "everything") {
+      if (!itemType && !tag) {
+        const items = await this.get("items/top", { ...found, limit, ...NEWEST_FIRST });
+        return { items: items || [], untraced: 0 };
+      }
+      // itemType and tag also bring in the files, notes and annotations of the
+      // matches, so the answer is picked by key, as for everything. The search
+      // names the matches to Paperly a second time, rather than their keys,
+      // which could run to thousands.
+      const owners = new Set(await this.keys("items/top", found));
+      return { items: await this.newest(owners, found, { limit, itemType, tag }), untraced: 0 };
+    }
     // Every match, with the files and notes of each
     const matches = await this.keys("items", found);
     if (!matches.length) {
@@ -163,7 +171,8 @@ export class Paperly {
         owners.add(file.data.parentItem || file.key);
       }
     }
-    return { items: await this.newest(owners, { limit, itemType, tag }), untraced: files.size - traced.length };
+    const items = await this.newest(owners, { itemKey: [...owners].join(",") }, { limit, itemType, tag });
+    return { items, untraced: files.size - traced.length };
   }
 
   /** The keys of what a list request finds: Paperly lists them without describing anything. */
@@ -174,7 +183,8 @@ export class Paperly {
 
   /**
    * The newest `limit` of the top-level items `owners`, narrowed by itemType
-   * and tag.
+   * and tag. `where` asks Paperly for the owners: by their keys, or by the
+   * search that found them all and nothing else.
    *
    * Those two narrow through a scope that includes children, so the filtered
    * list also holds the files, notes and annotations of the owners -- every
@@ -184,12 +194,12 @@ export class Paperly {
    * the children are dropped by key, and only the items that make the answer
    * are described, asked for by key with no filter, which brings no child.
    */
-  async newest(owners, { limit, itemType, tag }) {
-    // Without keys, the request would list the whole library
+  async newest(owners, where, { limit, itemType, tag }) {
+    // Nothing to pick from; and by keys, none would list the whole library
     if (!owners.size) {
       return [];
     }
-    const sorted = await this.keys("items/top", { itemKey: [...owners].join(","), itemType, tag, ...NEWEST_FIRST });
+    const sorted = await this.keys("items/top", { ...where, itemType, tag, ...NEWEST_FIRST });
     const chosen = sorted.filter((key) => owners.has(key)).slice(0, limit);
     if (!chosen.length) {
       return [];
