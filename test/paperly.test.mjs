@@ -34,7 +34,15 @@ test("an answer that is slow to arrive is given up on too", async () => {
       return new Response(body, { status: 200 });
     },
   });
-  await assert.rejects(paperly.get("items"), /^Error: Paperly is not responding/);
+  // AbortSignal.timeout's timer does not keep Node running, and with no
+  // socket open nothing else here does: Node 18 and 20 would end the test
+  // before the timeout fired
+  const alive = setInterval(() => {}, 1000);
+  try {
+    await assert.rejects(paperly.get("items"), /^Error: Paperly is not responding/);
+  } finally {
+    clearInterval(alive);
+  }
 });
 
 test("an error from Paperly is shortened without cutting a character in half", async () => {
