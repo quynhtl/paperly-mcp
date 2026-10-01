@@ -1,0 +1,14 @@
+{
+  "name": "paperly",
+  "displayName": "Paperly",
+  "version": "0.1.0",
+  "description": "Read your Paperly library from Claude: search your papers, read their full text, your highlights and notes, and format references. Read-only; talks only to Paperly on your computer.",
+  "author": {
+    "name": "quynhtl",
+    "url": "https://github.com/quynhtl"
+  },
+  "homepage": "https://github.com/quynhtl/paperly-mcp",
+  "repository": "https://github.com/quynhtl/paperly-mcp",
+  "license": "MIT",
+  "keywords": ["paperly", "research", "papers", "references", "citations"]
+}

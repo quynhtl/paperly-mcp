@@ -1,0 +1,14 @@
+{
+  "name": "paperly-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read your Paperly library from Claude: an MCP server and skill, packaged as a Claude plugin.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  }
+}

@@ -1,0 +1,188 @@
+import { after, before, describe, test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { startFakePaperly } from "./fake-paperly.mjs";
+import { startServer } from "./client.mjs";
+
+const manifest = JSON.parse(readFileSync(new URL("../.claude-plugin/plugin.json", import.meta.url), "utf8"));
+
+describe("the protocol", () => {
+  let fake, server;
+  before(async () => {
+    fake = await startFakePaperly();
+    server = startServer({ PAPERLY_API_URL: fake.url });
+  });
+  after(async () => {
+    await server.close();
+    await fake.close();
+  });
+
+  test("initialize agrees on a protocol version and says what the server is", async () => {
+    const { result } = await server.request("initialize", {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "test", version: "1" },
+    });
+    assert.equal(result.protocolVersion, "2025-06-18");
+    assert.deepEqual(result.capabilities, { tools: { listChanged: false } });
+    assert.equal(result.serverInfo.name, "paperly");
+    assert.equal(result.serverInfo.version, manifest.version);
+    assert.match(result.instructions, /search_library/);
+    server.notify("notifications/initialized");
+  });
+
+  test("a version the server does not know gets its newest", async () => {
+    const { result } = await server.request("initialize", { protocolVersion: "1999-01-01", capabilities: {} });
+    assert.equal(result.protocolVersion, "2025-11-25");
+  });
+
+  test("every tool is listed, described, and read-only", async () => {
+    const { result } = await server.request("tools/list", {});
+    const names = result.tools.map((t) => t.name).sort();
+    assert.deepEqual(names, [
+      "format_bibliography",
+      "get_annotations",
+      "get_collection_items",
+      "get_fulltext",
+      "get_item",
+      "get_notes",
+      "list_collections",
+      "search_library",
+    ]);
+    for (const tool of result.tools) {
+      assert.ok(tool.title && tool.description, tool.name);
+      assert.equal(tool.inputSchema.type, "object", tool.name);
+      assert.equal(tool.annotations.readOnlyHint, true, tool.name);
+      assert.equal(tool.annotations.title, tool.title, tool.name);
+    }
+  });
+
+  test("ping, unknown methods and unknown tools", async () => {
+    assert.deepEqual((await server.request("ping")).result, {});
+    assert.equal((await server.request("resources/list")).error.code, -32601);
+    assert.equal((await server.request("tools/call", { name: "delete_everything", arguments: {} })).error.code, -32602);
+  });
+
+  test("a line that is not JSON gets a parse error, and the server carries on", async () => {
+    const response = await server.raw("{ not json");
+    assert.equal(response.error.code, -32700);
+    assert.deepEqual((await server.request("ping")).result, {});
+  });
+
+  test("arguments are checked before anything reaches Paperly", async () => {
+    const before = fake.requests.length;
+    const missing = await server.call("get_item", {});
+    assert.equal(missing.isError, true);
+    assert.match(missing.text, /"key" is required/);
+    const badKey = await server.call("get_item", { key: "../../etc" });
+    assert.equal(badKey.isError, true);
+    const extra = await server.call("search_library", { query: "x", delete: true });
+    assert.match(extra.text, /not an argument/);
+    assert.equal(fake.requests.length, before);
+  });
+});
+
+describe("the tools", () => {
+  let fake, server;
+  before(async () => {
+    fake = await startFakePaperly();
+    server = startServer({ PAPERLY_API_URL: fake.url });
+    await server.request("initialize", { protocolVersion: "2025-06-18", capabilities: {} });
+  });
+  after(async () => {
+    await server.close();
+    await fake.close();
+  });
+
+  test("search_library lists matches with their keys", async () => {
+    const { text, isError } = await server.call("search_library", { query: "attention" });
+    assert.equal(isError, false);
+    assert.match(text, /^1 item\(s\) match/);
+    assert.match(text, /\[ATTN0001\] Attention Is All You Need — Vaswani et al\., 2017/);
+    assert.match(text, /doi:10\.48550/);
+    assert.equal(fake.requests.at(-1).searchParams.get("qmode"), "titleCreatorYear");
+
+    const none = await server.call("search_library", { query: "quantum", mode: "everything" });
+    assert.match(none.text, /Nothing in the library matches/);
+    assert.equal(fake.requests.at(-1).searchParams.get("qmode"), "everything");
+  });
+
+  test("get_item gives fields, the reference, attachments and notes", async () => {
+    const { text } = await server.call("get_item", { key: "ATTN0001", style: "ieee" });
+    assert.match(text, /^# Attention Is All You Need/);
+    assert.match(text, /Creators: Ashish Vaswani \(author\); Noam Shazeer/);
+    assert.match(text, /DOI: 10\.48550/);
+    assert.match(text, /Reference: Attention Is All You Need\. \(ieee\)/);
+    assert.match(text, /Abstract:\nThe dominant/);
+    assert.match(text, /- \[PDF00001\] Full Text PDF \(application\/pdf\)/);
+    assert.match(text, /Notes: 1/);
+  });
+
+  test("get_item says when a key is unknown", async () => {
+    const { text, isError } = await server.call("get_item", { key: "NOPE0000" });
+    assert.equal(isError, true);
+    assert.match(text, /No item in the library has the key NOPE0000/);
+  });
+
+  test("get_fulltext reads the PDF in slices", async () => {
+    const first = await server.call("get_fulltext", { key: "ATTN0001", length: 1000 });
+    assert.match(first.text, /Full text of Full Text PDF \[PDF00001\], characters 0–1000 of \d+; 15 of 15 pages indexed/);
+    assert.match(first.text, /offset 1000\.\)$/);
+    const last = await server.call("get_fulltext", { key: "PDF00001", offset: 100000, length: 60000 });
+    assert.doesNotMatch(last.text, /There is more/);
+    const past = await server.call("get_fulltext", { key: "ATTN0001", offset: 10_000_000 });
+    assert.equal(past.isError, true);
+    const none = await server.call("get_fulltext", { key: "BOOK0001" });
+    assert.match(none.text, /has no full text/);
+  });
+
+  test("get_annotations lists highlights in reading order", async () => {
+    const { text } = await server.call("get_annotations", { key: "ATTN0001" });
+    const lines = text.split("\n");
+    assert.equal(lines[0], "## Full Text PDF [PDF00001]");
+    assert.equal(lines[1], "- p. 1, highlight (green): “The Transformer” [tags: core]");
+    assert.equal(lines[2], "- p. 4, highlight (yellow): “multi-head attention” — comment: key idea");
+  });
+
+  test("get_notes turns HTML notes into text", async () => {
+    const { text } = await server.call("get_notes", { key: "ATTN0001" });
+    assert.equal(text, "## Note [NOTE0001]\nWhy it matters\nNo recurrence & no convolution.\n• Faster\n• Parallel");
+    const none = await server.call("get_notes", { key: "BOOK0001" });
+    assert.match(none.text, /Deep Learning has no notes/);
+  });
+
+  test("collections are listed nested, and their items one per line", async () => {
+    const { text } = await server.call("list_collections", {});
+    assert.equal(text, "- Thesis [THES0001] (1 items)\n  - Chapter 2 [CHAP0002] (0 items)");
+    const items = await server.call("get_collection_items", { key: "THES0001" });
+    assert.match(items.text, /^\[ATTN0001\] Attention Is All You Need/);
+    const empty = await server.call("get_collection_items", { key: "CHAP0002" });
+    assert.equal(empty.text, "The collection is empty.");
+    const missing = await server.call("get_collection_items", { key: "NOPE0000" });
+    assert.equal(missing.isError, true);
+  });
+
+  test("format_bibliography asks Paperly for the style", async () => {
+    const { text } = await server.call("format_bibliography", { keys: ["ATTN0001", "BOOK0001"], style: "nature" });
+    assert.equal(text, "Vaswani, Attention Is All You Need (nature).\nGoodfellow, Deep Learning (nature).");
+    assert.equal(fake.requests.at(-1).searchParams.get("itemKey"), "ATTN0001,BOOK0001");
+  });
+});
+
+describe("when Paperly can't be reached", () => {
+  test("a closed Paperly and a switched-off API each say what to do", async () => {
+    const fake = await startFakePaperly({ enabled: false });
+    const off = startServer({ PAPERLY_API_URL: fake.url });
+    const disabled = await off.call("search_library", { query: "x" });
+    assert.equal(disabled.isError, true);
+    assert.match(disabled.text, /Settings → Advanced/);
+    await off.close();
+    await fake.close();
+
+    // Nothing listens on the port the fake just gave up
+    const closed = startServer({ PAPERLY_API_URL: fake.url });
+    const notRunning = await closed.call("search_library", { query: "x" });
+    assert.match(notRunning.text, /Make sure Paperly is open/);
+    await closed.close();
+  });
+});

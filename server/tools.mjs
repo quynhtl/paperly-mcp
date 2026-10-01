@@ -1,0 +1,327 @@
+// What Claude can ask of the library. Every tool only reads.
+import { ToolError } from "./mcp.mjs";
+import { htmlToText, itemDetails, itemLine } from "./text.mjs";
+
+const READ_ONLY = { readOnlyHint: true, openWorldHint: false };
+
+const KEY = {
+  type: "string",
+  pattern: "^[A-Z0-9]{8}$",
+  description: "An item's 8-character key, as shown in [brackets] by search_library",
+};
+
+// Full text comes back in slices: long papers would otherwise fill the context
+const SLICE = 20000;
+const SLICE_MAX = 60000;
+
+// When an item has several files, read the one most likely to be the paper
+const FULLTEXT_PREFERENCE = { "application/pdf": 0, "application/epub+zip": 1, "text/html": 2 };
+
+const COLORS = {
+  "#ffd400": "yellow",
+  "#ff6666": "red",
+  "#5fb236": "green",
+  "#2ea8e5": "blue",
+  "#a28ae5": "purple",
+  "#e56eee": "magenta",
+  "#f19837": "orange",
+  "#aaaaaa": "grey",
+};
+
+function ofType(items, type) {
+  return (items || []).filter((child) => child.data?.itemType === type);
+}
+
+async function requireItem(paperly, key) {
+  const item = await paperly.item(key);
+  if (!item) {
+    throw new ToolError(`No item in the library has the key ${key}. Find keys with search_library.`);
+  }
+  return item;
+}
+
+/** The item itself if it is an attachment, or its attachments, best first. */
+async function attachmentsOf(paperly, item) {
+  if (item.data.itemType === "attachment") {
+    return [item];
+  }
+  const attachments = ofType(await paperly.children(item.key), "attachment");
+  const rank = (a) => FULLTEXT_PREFERENCE[a.data.contentType] ?? 9;
+  return attachments.sort((a, b) => rank(a) - rank(b));
+}
+
+function annotationLine(annotation) {
+  const d = annotation.data;
+  const where = d.annotationPageLabel ? `p. ${d.annotationPageLabel}` : "";
+  const color = COLORS[(d.annotationColor || "").toLowerCase()];
+  const kind = [d.annotationType, color && `(${color})`].filter(Boolean).join(" ");
+  const parts = [`- ${[where, kind].filter(Boolean).join(", ")}`];
+  if (d.annotationText) {
+    parts.push(`: “${d.annotationText.trim()}”`);
+  }
+  if (d.annotationComment) {
+    parts.push(` — comment: ${d.annotationComment.trim()}`);
+  }
+  if (d.tags?.length) {
+    parts.push(` [tags: ${d.tags.map((t) => t.tag).join(", ")}]`);
+  }
+  return parts.join("");
+}
+
+export function addTools(server, paperly) {
+  server.tool({
+    name: "search_library",
+    title: "Search the Paperly library",
+    description:
+      "Finds items (papers, books, chapters...) in the user's Paperly library. By default it matches titles, " +
+      "authors and years; with mode \"everything\" it also searches notes and the full text of PDFs. Returns one " +
+      "line per item, newest first, starting with the item's key in [brackets]; pass that key to the other tools.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", minLength: 1, maxLength: 500, description: "Words to look for" },
+        mode: {
+          type: "string",
+          enum: ["titleCreatorYear", "everything"],
+          description: "titleCreatorYear (the default) or everything",
+        },
+        limit: { type: "integer", minimum: 1, maximum: 50, description: "At most this many items (default 15)" },
+        itemType: { type: "string", maxLength: 50, description: "Only this item type, such as journalArticle or book" },
+        tag: { type: "string", maxLength: 200, description: "Only items with this tag" },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    annotations: READ_ONLY,
+    async run({ query, mode, limit = 15, itemType, tag }) {
+      const items = await paperly.search({ query, mode, limit, itemType, tag });
+      if (!items?.length) {
+        return `Nothing in the library matches “${query}”.`;
+      }
+      return [`${items.length} item(s) match “${query}”:`, ...items.map(itemLine)].join("\n");
+    },
+  });
+
+  server.tool({
+    name: "get_item",
+    title: "Get an item's details",
+    description:
+      "Everything the library holds about one item: its fields, creators, tags, abstract, a formatted reference, " +
+      "and what is attached to it (files, notes).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        key: KEY,
+        style: {
+          type: "string",
+          maxLength: 200,
+          description: "Citation style for the reference, such as apa (the default), chicago-author-date or ieee",
+        },
+      },
+      required: ["key"],
+      additionalProperties: false,
+    },
+    annotations: READ_ONLY,
+    async run({ key, style = "apa" }) {
+      const item = await paperly.item(key, { style });
+      if (!item) {
+        throw new ToolError(`No item in the library has the key ${key}. Find keys with search_library.`);
+      }
+      const lines = [itemDetails(item)];
+      if (item.data.itemType !== "attachment" && item.data.itemType !== "note") {
+        const children = await paperly.children(key);
+        const attachments = ofType(children, "attachment");
+        const notes = ofType(children, "note");
+        if (attachments.length) {
+          lines.push("", "Attachments:");
+          for (const a of attachments) {
+            lines.push(`- [${a.key}] ${a.data.title || a.data.filename || "(file)"} (${a.data.contentType || a.data.linkMode})`);
+          }
+        }
+        if (notes.length) {
+          lines.push("", `Notes: ${notes.length}; read them with get_notes.`);
+        }
+      }
+      return lines.join("\n");
+    },
+  });
+
+  server.tool({
+    name: "get_fulltext",
+    title: "Read an item's full text",
+    description:
+      "The text Paperly extracted from an item's PDF, EPUB or web page, in slices of up to 20,000 characters. " +
+      "Give the item's key (or an attachment's); when there is more, the answer says which offset to ask for next.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        key: KEY,
+        offset: { type: "integer", minimum: 0, description: "Start at this character (default 0)" },
+        length: { type: "integer", minimum: 1000, maximum: SLICE_MAX, description: "Characters to return (default 20000)" },
+      },
+      required: ["key"],
+      additionalProperties: false,
+    },
+    annotations: READ_ONLY,
+    async run({ key, offset = 0, length = SLICE }) {
+      const item = await requireItem(paperly, key);
+      let source = null;
+      for (const attachment of await attachmentsOf(paperly, item)) {
+        const fulltext = await paperly.fulltext(attachment.key);
+        if (fulltext?.content) {
+          source = { attachment, fulltext };
+          break;
+        }
+      }
+      if (!source) {
+        throw new ToolError(
+          `${item.data.title || key} has no full text in Paperly. It may have no PDF, or the PDF may not be indexed yet.`,
+        );
+      }
+      const { attachment, fulltext } = source;
+      const total = fulltext.content.length;
+      if (offset >= total) {
+        throw new ToolError(`The text is ${total} characters long, so offset ${offset} is past its end.`);
+      }
+      const end = Math.min(total, offset + length);
+      const pages = fulltext.totalPages ? `; ${fulltext.indexedPages ?? "?"} of ${fulltext.totalPages} pages indexed` : "";
+      const header = `Full text of ${attachment.data.title || attachment.data.filename || "the attachment"} [${attachment.key}], characters ${offset}–${end} of ${total}${pages}:`;
+      const more = end < total ? `\n\n(There is more: call get_fulltext with key ${key} and offset ${end}.)` : "";
+      return `${header}\n\n${fulltext.content.slice(offset, end)}${more}`;
+    },
+  });
+
+  server.tool({
+    name: "get_annotations",
+    title: "Get highlights and comments",
+    description:
+      "The user's highlights, underlines and comments on an item's PDFs and EPUBs, with page numbers, in reading order.",
+    inputSchema: {
+      type: "object",
+      properties: { key: KEY },
+      required: ["key"],
+      additionalProperties: false,
+    },
+    annotations: READ_ONLY,
+    async run({ key }) {
+      const item = await requireItem(paperly, key);
+      const sections = [];
+      for (const attachment of await attachmentsOf(paperly, item)) {
+        const annotations = ofType(await paperly.children(attachment.key), "annotation").sort((a, b) =>
+          String(a.data.annotationSortIndex ?? "").localeCompare(String(b.data.annotationSortIndex ?? "")),
+        );
+        if (annotations.length) {
+          sections.push(
+            `## ${attachment.data.title || attachment.data.filename || "Attachment"} [${attachment.key}]`,
+            ...annotations.map(annotationLine),
+          );
+        }
+      }
+      return sections.length ? sections.join("\n") : `There are no highlights or comments on ${item.data.title || key}.`;
+    },
+  });
+
+  server.tool({
+    name: "get_notes",
+    title: "Read an item's notes",
+    description: "The notes attached to an item, as plain text. Give a note's own key to read just that note.",
+    inputSchema: {
+      type: "object",
+      properties: { key: KEY },
+      required: ["key"],
+      additionalProperties: false,
+    },
+    annotations: READ_ONLY,
+    async run({ key }) {
+      const item = await requireItem(paperly, key);
+      const notes = item.data.itemType === "note" ? [item] : ofType(await paperly.children(key), "note");
+      if (!notes.length) {
+        return `${item.data.title || key} has no notes.`;
+      }
+      return notes.map((note) => `## Note [${note.key}]\n${htmlToText(note.data.note)}`).join("\n\n");
+    },
+  });
+
+  server.tool({
+    name: "list_collections",
+    title: "List collections",
+    description: "The library's collections (folders), nested as they are in Paperly, with their keys and sizes.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    annotations: READ_ONLY,
+    async run() {
+      const collections = (await paperly.collections()) || [];
+      if (!collections.length) {
+        return "The library has no collections.";
+      }
+      const byParent = new Map();
+      for (const c of collections) {
+        const parent = c.data.parentCollection || null;
+        if (!byParent.has(parent)) {
+          byParent.set(parent, []);
+        }
+        byParent.get(parent).push(c);
+      }
+      const lines = [];
+      const walk = (parent, depth) => {
+        const children = (byParent.get(parent) || []).sort((a, b) => a.data.name.localeCompare(b.data.name));
+        for (const c of children) {
+          const count = c.meta?.numItems;
+          lines.push(`${"  ".repeat(depth)}- ${c.data.name} [${c.key}]${count !== undefined ? ` (${count} items)` : ""}`);
+          walk(c.key, depth + 1);
+        }
+      };
+      walk(null, 0);
+      return lines.join("\n");
+    },
+  });
+
+  server.tool({
+    name: "get_collection_items",
+    title: "List a collection's items",
+    description: "The items in one collection, one line each with its key. Find collection keys with list_collections.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        key: { ...KEY, description: "A collection's key, from list_collections" },
+        limit: { type: "integer", minimum: 1, maximum: 200, description: "At most this many items (default 50)" },
+      },
+      required: ["key"],
+      additionalProperties: false,
+    },
+    annotations: READ_ONLY,
+    async run({ key, limit = 50 }) {
+      const items = await paperly.collectionItems(key, { limit });
+      if (items === null) {
+        throw new ToolError(`No collection has the key ${key}. Find keys with list_collections.`);
+      }
+      return items.length ? items.map(itemLine).join("\n") : "The collection is empty.";
+    },
+  });
+
+  server.tool({
+    name: "format_bibliography",
+    title: "Format references",
+    description:
+      "A bibliography for the given items in a citation style installed in Paperly, such as apa, " +
+      "chicago-author-date, ieee, modern-language-association or nature.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        keys: { type: "array", items: KEY, minItems: 1, maxItems: 100, description: "The items' keys" },
+        style: { type: "string", maxLength: 200, description: "Citation style (default apa)" },
+        locale: { type: "string", maxLength: 20, description: "Language of the references, such as en-US or vi-VN" },
+      },
+      required: ["keys"],
+      additionalProperties: false,
+    },
+    annotations: READ_ONLY,
+    async run({ keys, style = "apa", locale }) {
+      const html = await paperly.bibliography(keys, { style, locale });
+      const text = html === null ? "" : htmlToText(html);
+      if (!text) {
+        throw new ToolError("None of those keys are items in the library.");
+      }
+      return text;
+    },
+  });
+}
