@@ -1,8 +1,9 @@
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { startFakePaperly } from "./fake-paperly.mjs";
+import { MATH_X, startFakePaperly } from "./fake-paperly.mjs";
 import { startServer } from "./client.mjs";
+import { wellFormed } from "./helpers.mjs";
 
 const manifest = JSON.parse(readFileSync(new URL("../.claude-plugin/plugin.json", import.meta.url), "utf8"));
 
@@ -134,6 +135,21 @@ describe("the tools", () => {
     assert.equal(past.isError, true);
     const none = await server.call("get_fulltext", { key: "BOOK0001" });
     assert.match(none.text, /has no full text/);
+  });
+
+  test("get_fulltext never cuts a character in half", async () => {
+    // The 𝑥 takes units 999 and 1000, so a 1000-unit slice stops before it
+    const first = await server.call("get_fulltext", { key: "MATH0001", length: 1000 });
+    assert.match(first.text, /characters 0–999 of 2501/);
+    assert.match(first.text, /offset 999\.\)$/);
+    assert.ok(wellFormed(first.text));
+    const next = await server.call("get_fulltext", { key: "MATH0001", offset: 999, length: 1000 });
+    assert.match(next.text, /characters 999–1999 of 2501/);
+    assert.ok(next.text.includes(`\n\n${MATH_X}yyy`));
+    // An offset inside the pair starts with the whole character
+    const inside = await server.call("get_fulltext", { key: "MATH0001", offset: 1000, length: 1000 });
+    assert.match(inside.text, /characters 999–1999 of 2501/);
+    assert.ok(wellFormed(inside.text));
   });
 
   test("get_annotations lists highlights in reading order", async () => {

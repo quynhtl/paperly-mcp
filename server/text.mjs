@@ -25,6 +25,18 @@ export function htmlToText(html) {
     .trim();
 }
 
+/**
+ * `index`, or one less when it falls between the halves of a surrogate pair (a
+ * character past U+FFFF, such as the 𝑥 of a maths paper): a slice that starts
+ * or ends there keeps every character whole. Half a pair is not valid text,
+ * and the model's API can refuse it.
+ */
+export function charBoundary(text, index) {
+  const before = text.charCodeAt(index - 1);
+  const at = text.charCodeAt(index);
+  return before >= 0xd800 && before <= 0xdbff && at >= 0xdc00 && at <= 0xdfff ? index - 1 : index;
+}
+
 export function creatorName(creator) {
   return creator.name || [creator.firstName, creator.lastName].filter(Boolean).join(" ");
 }

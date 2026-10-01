@@ -4,6 +4,9 @@
 import http from "node:http";
 
 const pdfText = Array.from({ length: 2500 }, (_, i) => `Sentence ${i} of the paper about attention.`).join(" ");
+// A character past U+FFFF (two UTF-16 units) across position 1000
+export const MATH_X = String.fromCodePoint(0x1d465);
+const mathText = `${"x".repeat(999)}${MATH_X}${"y".repeat(1500)}`;
 
 export const LIBRARY = {
   items: [
@@ -82,6 +85,31 @@ export const LIBRARY = {
       },
     },
     {
+      key: "MATH0001",
+      meta: { parsedDate: "2020", numChildren: 1 },
+      data: {
+        key: "MATH0001",
+        itemType: "journalArticle",
+        title: "Notation for Variables",
+        creators: [{ creatorType: "author", firstName: "Ada", lastName: "Lovelace" }],
+        date: "2020",
+        tags: [],
+        collections: [],
+      },
+    },
+    {
+      key: "PDF00002",
+      meta: {},
+      data: {
+        key: "PDF00002",
+        itemType: "attachment",
+        parentItem: "MATH0001",
+        title: "Full Text PDF",
+        contentType: "application/pdf",
+        linkMode: "imported_file",
+      },
+    },
+    {
       key: "BOOK0001",
       meta: { parsedDate: "2016", numChildren: 0 },
       data: {
@@ -99,7 +127,10 @@ export const LIBRARY = {
       },
     },
   ],
-  fulltext: { PDF00001: { content: pdfText, indexedPages: 15, totalPages: 15 } },
+  fulltext: {
+    PDF00001: { content: pdfText, indexedPages: 15, totalPages: 15 },
+    PDF00002: { content: mathText, indexedPages: 1, totalPages: 1 },
+  },
   collections: [
     { key: "THES0001", meta: { numItems: 1 }, data: { key: "THES0001", name: "Thesis", parentCollection: false } },
     { key: "CHAP0002", meta: { numItems: 0 }, data: { key: "CHAP0002", name: "Chapter 2", parentCollection: "THES0001" } },

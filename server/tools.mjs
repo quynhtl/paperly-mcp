@@ -1,6 +1,6 @@
 // What Claude can ask of the library. Every tool only reads.
 import { ToolError } from "./mcp.mjs";
-import { htmlToText, itemDetails, itemLine } from "./text.mjs";
+import { charBoundary, htmlToText, itemDetails, itemLine } from "./text.mjs";
 
 const READ_ONLY = { readOnlyHint: true, openWorldHint: false };
 
@@ -179,15 +179,18 @@ export function addTools(server, paperly) {
         );
       }
       const { attachment, fulltext } = source;
-      const total = fulltext.content.length;
+      const text = fulltext.content;
+      const total = text.length;
       if (offset >= total) {
         throw new ToolError(`The text is ${total} characters long, so offset ${offset} is past its end.`);
       }
-      const end = Math.min(total, offset + length);
+      // Offsets count UTF-16 units, so either end may fall inside a character
+      const start = charBoundary(text, offset);
+      const end = charBoundary(text, Math.min(total, start + length));
       const pages = fulltext.totalPages ? `; ${fulltext.indexedPages ?? "?"} of ${fulltext.totalPages} pages indexed` : "";
-      const header = `Full text of ${attachment.data.title || attachment.data.filename || "the attachment"} [${attachment.key}], characters ${offset}–${end} of ${total}${pages}:`;
+      const header = `Full text of ${attachment.data.title || attachment.data.filename || "the attachment"} [${attachment.key}], characters ${start}–${end} of ${total}${pages}:`;
       const more = end < total ? `\n\n(There is more: call get_fulltext with key ${key} and offset ${end}.)` : "";
-      return `${header}\n\n${fulltext.content.slice(offset, end)}${more}`;
+      return `${header}\n\n${text.slice(start, end)}${more}`;
     },
   });
 

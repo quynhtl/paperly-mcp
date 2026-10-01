@@ -2,6 +2,7 @@
 // app runs on this computer (port 23119), the same read-only API Zotero 7 and
 // later offer. Nothing here writes to the library.
 import { ToolError } from "./mcp.mjs";
+import { charBoundary } from "./text.mjs";
 
 export const DEFAULT_API_URL = "http://127.0.0.1:23119/api/";
 
@@ -42,7 +43,8 @@ export class Paperly {
       return null;
     }
     if (!response.ok) {
-      throw new ToolError(`Paperly answered ${response.status}: ${(await response.text()).slice(0, 200)}`);
+      const body = await response.text();
+      throw new ToolError(`Paperly answered ${response.status}: ${body.slice(0, charBoundary(body, 200))}`);
     }
     return as === "text" ? response.text() : response.json();
   }
