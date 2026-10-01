@@ -81,10 +81,15 @@ export class Paperly {
     try {
       response = await this.fetch(url, { headers: { Accept: "application/json" }, signal });
     } catch {
+      // At an address someone set, the address itself may be what is wrong
+      const where =
+        this.root === DEFAULT_API_URL
+          ? ""
+          : ` Or PAPERLY_API_URL (${this.root}) is not where Paperly listens; normally that is ${DEFAULT_API_URL}.`;
       throw signal.aborted
         ? notResponding()
         : new ToolError(
-            "Paperly isn't answering. Make sure Paperly is open; if it is, its local server may be turned off.",
+            `Paperly isn't answering. Make sure Paperly is open; if it is, its local server may be turned off.${where}`,
           );
     }
     // The time runs on while the answer arrives

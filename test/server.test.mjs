@@ -491,6 +491,8 @@ describe("when Paperly can't be reached", () => {
     const closed = startServer({ PAPERLY_API_URL: fake.url });
     const notRunning = await closed.call("search_library", { query: "x" });
     assert.match(notRunning.text, /Make sure Paperly is open/);
+    // A PAPERLY_API_URL that was set is named, since it may be the mistake
+    assert.match(notRunning.text, /PAPERLY_API_URL \(http:\/\/127\.0\.0\.1:\d+\/api\/\) is not where Paperly listens/);
     await closed.close();
   });
 });

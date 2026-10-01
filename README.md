@@ -59,8 +59,10 @@ On Windows, type `curl.exe`. In Windows PowerShell, `curl` stands for
 the connection without an answer, as if it were not running.
 
 `PAPERLY_API_URL` changes where the server looks for Paperly (default
-`http://127.0.0.1:23119/api/`). If either setting is wrong, every tool says so,
-rather than finding nothing or calling a key unknown.
+`http://127.0.0.1:23119/api/`). If either setting names a library or a path
+Paperly doesn't have, every tool says so, rather than finding nothing or
+calling a key unknown; at an address where nothing answers, the tools say
+Paperly isn't answering, and name the address when it isn't the default.
 
 ## Privacy policy
 
