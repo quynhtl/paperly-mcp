@@ -61,6 +61,14 @@ export class Paperly {
     return this.get(`items/${encodeURIComponent(key)}/children`);
   }
 
+  /**
+   * The annotations on an item's files, or on a file. items/<key>/children
+   * never has them: Paperly counts only notes and files as children.
+   */
+  annotations(key) {
+    return this.get("items", { itemKey: key, itemType: "annotation" });
+  }
+
   fulltext(key) {
     return this.get(`items/${encodeURIComponent(key)}/fulltext`);
   }

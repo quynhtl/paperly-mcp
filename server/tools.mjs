@@ -208,19 +208,25 @@ export function addTools(server, paperly) {
     annotations: READ_ONLY,
     async run({ key }) {
       const item = await requireItem(paperly, key);
+      // One request for the annotations on all of the item's files
+      const annotations = ofType(await paperly.annotations(key), "annotation");
+      if (!annotations.length) {
+        return `There are no highlights or comments on ${item.data.title || key}.`;
+      }
+      // Each under its file, the best file first
+      const files = await attachmentsOf(paperly, item);
+      const fileKeys = new Set([...files.map((a) => a.key), ...annotations.map((a) => a.data.parentItem)]);
       const sections = [];
-      for (const attachment of await attachmentsOf(paperly, item)) {
-        const annotations = ofType(await paperly.children(attachment.key), "annotation").sort((a, b) =>
-          String(a.data.annotationSortIndex ?? "").localeCompare(String(b.data.annotationSortIndex ?? "")),
-        );
-        if (annotations.length) {
-          sections.push(
-            `## ${attachment.data.title || attachment.data.filename || "Attachment"} [${attachment.key}]`,
-            ...annotations.map(annotationLine),
-          );
+      for (const fileKey of fileKeys) {
+        const own = annotations
+          .filter((a) => a.data.parentItem === fileKey)
+          .sort((a, b) => String(a.data.annotationSortIndex ?? "").localeCompare(String(b.data.annotationSortIndex ?? "")));
+        if (own.length) {
+          const file = files.find((a) => a.key === fileKey)?.data ?? {};
+          sections.push(`## ${file.title || file.filename || "Attachment"} [${fileKey}]`, ...own.map(annotationLine));
         }
       }
-      return sections.length ? sections.join("\n") : `There are no highlights or comments on ${item.data.title || key}.`;
+      return sections.join("\n");
     },
   });
 

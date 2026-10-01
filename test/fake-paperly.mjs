@@ -111,6 +111,34 @@ export const LIBRARY = {
       },
     },
     {
+      key: "SOLO0001",
+      meta: { numChildren: 1 },
+      data: {
+        key: "SOLO0001",
+        itemType: "attachment",
+        title: "Scanned chapter",
+        contentType: "application/pdf",
+        linkMode: "imported_file",
+        tags: [],
+        collections: [],
+      },
+    },
+    {
+      key: "ANNO0003",
+      meta: {},
+      data: {
+        key: "ANNO0003",
+        itemType: "annotation",
+        parentItem: "SOLO0001",
+        annotationType: "underline",
+        annotationText: "gradient descent",
+        annotationColor: "#2ea8e5",
+        annotationPageLabel: "12",
+        annotationSortIndex: "00011|000300|00200",
+        tags: [],
+      },
+    },
+    {
       key: "BOOK0001",
       meta: { parsedDate: "2016", numChildren: 0 },
       data: {
@@ -139,6 +167,47 @@ export const LIBRARY = {
 };
 
 const isTop = (item) => !item.data.parentItem;
+const isRegular = (item) => !["attachment", "note", "annotation"].includes(item.data.itemType);
+
+/**
+ * A set of items with what a search scope "including children" adds to it:
+ * their files and notes, and the annotations on those files, or on the items
+ * themselves when they are files (Zotero.Search.prototype.search).
+ */
+function withChildren(items) {
+  const keys = new Set(items.map((i) => i.key));
+  const parent = (i) => LIBRARY.items.find((p) => p.key === i.data.parentItem);
+  return LIBRARY.items.filter(
+    (i) =>
+      keys.has(i.key) ||
+      keys.has(i.data.parentItem) ||
+      (i.data.itemType === "annotation" && keys.has(parent(i)?.data.parentItem)),
+  );
+}
+
+/** items and items/top, searched the way LocalAPI.Items builds its search. */
+function searchItems(top, q) {
+  let items = LIBRARY.items.filter((i) => !top || isTop(i));
+  if (q.get("itemKey")) {
+    const keys = q.get("itemKey").split(",");
+    const scope = withChildren(LIBRARY.items.filter((i) => keys.includes(i.key)));
+    items = items.filter((i) => scope.includes(i));
+  }
+  if (q.get("q")) {
+    const words = q.get("q").toLowerCase().split(/\s+/);
+    const fields = (i) => [i.data.title, i.data.date, ...(i.data.creators || []).map((c) => c.lastName)].join(" ").toLowerCase();
+    items = items.filter((i) => isTop(i) && words.every((word) => fields(i).includes(word)));
+  }
+  // itemType and tag each narrow the search through a scope that includes
+  // children, so a child of an item found so far can come back too
+  if (q.get("itemType")) {
+    items = withChildren(items).filter((i) => i.data.itemType === q.get("itemType"));
+  }
+  if (q.get("tag")) {
+    items = withChildren(items).filter((i) => (i.data.tags || []).some((t) => t.tag === q.get("tag")));
+  }
+  return items;
+}
 
 function json(res, status, body) {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -177,20 +246,9 @@ export function startFakePaperly(options = { enabled: true }) {
     const path = url.pathname.replace(/^\/api\/users\/0\//, "");
     const q = url.searchParams;
     let m;
-    if (path === "items/top") {
-      const query = (q.get("q") || "").toLowerCase();
-      let items = LIBRARY.items.filter(isTop).filter((item) =>
-        [item.data.title, item.data.date, ...(item.data.creators || []).map((c) => c.lastName)]
-          .join(" ")
-          .toLowerCase()
-          .includes(query),
-      );
-      if (q.get("itemType")) items = items.filter((i) => i.data.itemType === q.get("itemType"));
-      return list(res, items, q);
-    }
-    if (path === "items" && q.get("format") === "bib") {
-      const keys = (q.get("itemKey") || "").split(",");
-      const items = LIBRARY.items.filter((i) => keys.includes(i.key));
+    if ((path === "items" || path === "items/top") && q.get("format") === "bib") {
+      // Only regular items have a reference
+      const items = searchItems(path === "items/top", q).filter(isRegular);
       res.writeHead(200, { "Content-Type": "text/html" });
       res.end(
         `<div class="csl-bib-body">${items
@@ -199,8 +257,12 @@ export function startFakePaperly(options = { enabled: true }) {
       );
       return;
     }
+    if (path === "items" || path === "items/top") {
+      return list(res, searchItems(path === "items/top", q), q);
+    }
     if ((m = /^items\/([A-Z0-9]{8})\/children$/.exec(path))) {
-      return json(res, 200, LIBRARY.items.filter((i) => i.data.parentItem === m[1]));
+      // Files and notes: an annotation is no child of its file here
+      return list(res, LIBRARY.items.filter((i) => i.data.parentItem === m[1] && i.data.itemType !== "annotation"), q);
     }
     if ((m = /^items\/([A-Z0-9]{8})\/fulltext$/.exec(path))) {
       const fulltext = LIBRARY.fulltext[m[1]];

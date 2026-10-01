@@ -158,6 +158,20 @@ describe("the tools", () => {
     assert.equal(lines[0], "## Full Text PDF [PDF00001]");
     assert.equal(lines[1], "- p. 1, highlight (green): “The Transformer” [tags: core]");
     assert.equal(lines[2], "- p. 4, highlight (yellow): “multi-head attention” — comment: key idea");
+    assert.equal(lines.length, 3);
+    // Not from the file's children, which never include annotations
+    const asked = fake.requests.find((url) => url.searchParams.get("itemType") === "annotation");
+    assert.equal(asked.pathname, "/api/users/0/items");
+    assert.equal(asked.searchParams.get("itemKey"), "ATTN0001");
+  });
+
+  test("get_annotations reads a file's own annotations, and says when there are none", async () => {
+    const file = await server.call("get_annotations", { key: "PDF00001" });
+    assert.match(file.text, /^## Full Text PDF \[PDF00001\]\n- p\. 1/);
+    const standalone = await server.call("get_annotations", { key: "SOLO0001" });
+    assert.equal(standalone.text, "## Scanned chapter [SOLO0001]\n- p. 12, underline (blue): “gradient descent”");
+    const none = await server.call("get_annotations", { key: "MATH0001" });
+    assert.equal(none.text, "There are no highlights or comments on Notation for Variables.");
   });
 
   test("get_notes turns HTML notes into text", async () => {
