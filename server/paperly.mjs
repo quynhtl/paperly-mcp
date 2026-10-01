@@ -221,8 +221,14 @@ export class Paperly {
     return this.get("items/top", { itemKey: chosen.join(","), ...NEWEST_FIRST });
   }
 
+  /**
+   * An item, and with a `style` its reference. Paperly formats one whenever
+   * it is asked to, in its own default style if none is named, and downloads
+   * that style if it does not have it: only a reference that is shown is
+   * worth that.
+   */
   item(key, { style } = {}) {
-    return this.get(`items/${encodeURIComponent(key)}`, { include: "data,bib", style }, { lookup: true });
+    return this.get(`items/${encodeURIComponent(key)}`, { include: style ? "data,bib" : "data", style }, { lookup: true });
   }
 
   children(key) {

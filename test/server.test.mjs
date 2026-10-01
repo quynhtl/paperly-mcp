@@ -253,6 +253,28 @@ describe("the tools", () => {
     assert.match(text, /Notes: 1/);
   });
 
+  test("only get_item has Paperly format a reference, in APA unless told otherwise", async () => {
+    const itemRequests = async (tool, args) => {
+      const requests = fake.requests.length;
+      const { isError } = await server.call(tool, args);
+      assert.equal(isError, false, tool);
+      const asked = fake.requests.slice(requests).filter((url) => url.pathname === `/api/users/0/items/${args.key}`);
+      assert.equal(asked.length, 1, tool);
+      return asked[0].searchParams;
+    };
+    // Asked for a reference with no style, Paperly formats it in its default
+    // style, and downloads that if it has to: reading needs no reference
+    for (const tool of ["get_fulltext", "get_notes", "get_annotations"]) {
+      const params = await itemRequests(tool, { key: "ATTN0001" });
+      assert.equal(params.get("include"), "data", tool);
+      assert.equal(params.has("style"), false, tool);
+    }
+    const apa = await itemRequests("get_item", { key: "ATTN0001" });
+    assert.equal(apa.get("include"), "data,bib");
+    assert.equal(apa.get("style"), "apa");
+    assert.equal((await itemRequests("get_item", { key: "ATTN0001", style: "ieee" })).get("style"), "ieee");
+  });
+
   test("get_item says when a key is unknown", async () => {
     const { text, isError } = await server.call("get_item", { key: "NOPE0000" });
     assert.equal(isError, true);
