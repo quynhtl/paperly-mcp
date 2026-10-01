@@ -44,13 +44,19 @@ The server needs Node.js 18 or later and nothing else: it has no dependencies,
 so nothing is downloaded when you install it.
 
 To use another library than My Library, set `PAPERLY_LIBRARY` to
-`groups/<group id>` in the server's environment. Paperly lists your groups, each
-with its `id` and `name`, through its local API. It turns browsers away there,
-so ask from a terminal while Paperly is open:
+`groups/<group id>` in the server's environment. A group's id is the number in
+the address of its page on zotero.org,
+`https://www.zotero.org/groups/<group id>/...`. Paperly also lists your groups,
+each with its `id` and `name`, through its local API. It turns browsers away
+there, so ask from a terminal while Paperly is open:
 
 ```sh
 curl http://127.0.0.1:23119/api/users/0/groups
 ```
+
+On Windows, type `curl.exe`. In Windows PowerShell, `curl` stands for
+`Invoke-WebRequest`, which introduces itself as a browser, so Paperly closes
+the connection without an answer, as if it were not running.
 
 `PAPERLY_API_URL` changes where the server looks for Paperly (default
 `http://127.0.0.1:23119/api/`). If either setting is wrong, the tools say so
