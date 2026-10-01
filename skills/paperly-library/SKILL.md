@@ -24,6 +24,8 @@ When the user asks what a paper says *to them* -- what they found important,
 what to cite, what they disagreed with -- read `get_annotations` and
 `get_notes` before the full text. Their highlights and comments are the most
 direct evidence of what matters to them. Quote highlights exactly as they are.
+When there are many, they come in pages, and each answer says which offset to
+ask for next.
 
 ## Read full text in slices
 

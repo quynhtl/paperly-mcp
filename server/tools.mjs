@@ -14,6 +14,10 @@ const KEY = {
 const SLICE = 20000;
 const SLICE_MAX = 60000;
 
+// Annotations and notes come back in pages of about this many characters, for
+// the same reason: a book highlighted from cover to cover runs far past it
+const PAGE = 40000;
+
 // When an item has several files, read the one most likely to be the paper
 const FULLTEXT_PREFERENCE = { "application/pdf": 0, "application/epub+zip": 1, "text/html": 2 };
 
@@ -66,6 +70,51 @@ function annotationLine(annotation) {
     parts.push(` [tags: ${d.tags.map((t) => t.tag).join(", ")}]`);
   }
   return parts.join("");
+}
+
+/** Text longer than a page, in pieces that fit: cut at a line break if one is near the end, else anywhere. */
+function pieces(text) {
+  const parts = [];
+  while (text.length > PAGE) {
+    const line = text.lastIndexOf("\n", PAGE);
+    const cut = line > PAGE / 2 ? line : charBoundary(text, PAGE);
+    parts.push(text.slice(0, cut));
+    text = text.slice(line === cut ? cut + 1 : cut);
+  }
+  parts.push(text);
+  return parts;
+}
+
+/**
+ * As many of the entries ({ heading, text }) from `offset` on as fit in a page,
+ * whole, each run of them under its heading, with `gap` before a new heading;
+ * and, when entries are left, the call that reads on from there.
+ */
+function page(entries, offset, gap, readOn) {
+  if (offset >= entries.length) {
+    throw new ToolError(`There is nothing at offset ${offset}; the last offset is ${entries.length - 1}.`);
+  }
+  const parts = [];
+  let size = 0;
+  let end = offset;
+  for (; end < entries.length; end++) {
+    const { heading, text } = entries[end];
+    const previous = entries[end - 1]?.heading;
+    let part = text;
+    if (end === offset) {
+      part = `${heading}${previous === heading ? " (continued)" : ""}\n${text}`;
+    } else if (heading !== previous) {
+      part = `${gap}${heading}\n${text}`;
+    }
+    // A page always has one entry, however long
+    if (end > offset && size + part.length + 1 > PAGE) {
+      break;
+    }
+    parts.push(part);
+    size += part.length + 1;
+  }
+  const more = end < entries.length ? `\n\n(There is more: call ${readOn} and offset ${end}.)` : "";
+  return `${parts.join("\n")}${more}`;
 }
 
 export function addTools(server, paperly) {
@@ -198,15 +247,19 @@ export function addTools(server, paperly) {
     name: "get_annotations",
     title: "Get highlights and comments",
     description:
-      "The user's highlights, underlines and comments on an item's PDFs and EPUBs, with page numbers, in reading order.",
+      "The user's highlights, underlines and comments on an item's PDFs and EPUBs, with page numbers, in reading order. " +
+      "Many of them come in pages of about 40,000 characters; the answer says which offset to ask for next.",
     inputSchema: {
       type: "object",
-      properties: { key: KEY },
+      properties: {
+        key: KEY,
+        offset: { type: "integer", minimum: 0, description: "Where to start, from the previous page's answer (default 0)" },
+      },
       required: ["key"],
       additionalProperties: false,
     },
     annotations: READ_ONLY,
-    async run({ key }) {
+    async run({ key, offset = 0 }) {
       const item = await requireItem(paperly, key);
       // One request for the annotations on all of the item's files
       const annotations = ofType(await paperly.annotations(key), "annotation");
@@ -216,38 +269,48 @@ export function addTools(server, paperly) {
       // Each under its file, the best file first
       const files = await attachmentsOf(paperly, item);
       const fileKeys = new Set([...files.map((a) => a.key), ...annotations.map((a) => a.data.parentItem)]);
-      const sections = [];
+      const entries = [];
       for (const fileKey of fileKeys) {
         const own = annotations
           .filter((a) => a.data.parentItem === fileKey)
           .sort((a, b) => String(a.data.annotationSortIndex ?? "").localeCompare(String(b.data.annotationSortIndex ?? "")));
-        if (own.length) {
-          const file = files.find((a) => a.key === fileKey)?.data ?? {};
-          sections.push(`## ${file.title || file.filename || "Attachment"} [${fileKey}]`, ...own.map(annotationLine));
+        const file = files.find((a) => a.key === fileKey)?.data ?? {};
+        const heading = `## ${file.title || file.filename || "Attachment"} [${fileKey}]`;
+        for (const annotation of own) {
+          entries.push(...pieces(annotationLine(annotation)).map((text) => ({ heading, text })));
         }
       }
-      return sections.join("\n");
+      return page(entries, offset, "", `get_annotations with key ${key}`);
     },
   });
 
   server.tool({
     name: "get_notes",
     title: "Read an item's notes",
-    description: "The notes attached to an item, as plain text. Give a note's own key to read just that note.",
+    description:
+      "The notes attached to an item, as plain text. Give a note's own key to read just that note. " +
+      "Long or many notes come in pages of about 40,000 characters; the answer says which offset to ask for next.",
     inputSchema: {
       type: "object",
-      properties: { key: KEY },
+      properties: {
+        key: KEY,
+        offset: { type: "integer", minimum: 0, description: "Where to start, from the previous page's answer (default 0)" },
+      },
       required: ["key"],
       additionalProperties: false,
     },
     annotations: READ_ONLY,
-    async run({ key }) {
+    async run({ key, offset = 0 }) {
       const item = await requireItem(paperly, key);
       const notes = item.data.itemType === "note" ? [item] : ofType(await paperly.children(key), "note");
       if (!notes.length) {
         return `${item.data.title || key} has no notes.`;
       }
-      return notes.map((note) => `## Note [${note.key}]\n${htmlToText(note.data.note)}`).join("\n\n");
+      // A note made from every annotation in a book can be longer than a page by itself
+      const entries = notes.flatMap((note) =>
+        pieces(htmlToText(note.data.note)).map((text) => ({ heading: `## Note [${note.key}]`, text })),
+      );
+      return page(entries, offset, "\n", `get_notes with key ${key}`);
     },
   });
 

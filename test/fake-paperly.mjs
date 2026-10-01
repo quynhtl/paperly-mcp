@@ -9,6 +9,31 @@ const pdfText = Array.from({ length: 2500 }, (_, i) => `Sentence ${i} of the pap
 export const MATH_X = String.fromCodePoint(0x1d465);
 const mathText = `${"x".repeat(999)}${MATH_X}${"y".repeat(1500)}`;
 
+// A book read closely: more highlights than fit in one answer, and notes, one
+// of them longer than an answer on its own
+export const BOOK_HIGHLIGHTS = 300;
+export const BOOK_PARAGRAPHS = 1000;
+const bookHighlights = Array.from({ length: BOOK_HIGHLIGHTS }, (_, i) => {
+  const key = `HL${String(i).padStart(6, "0")}`;
+  return {
+    key,
+    meta: {},
+    data: {
+      key,
+      itemType: "annotation",
+      parentItem: "EPUB0001",
+      annotationType: "highlight",
+      annotationText: `Highlight ${i}: ${"words ".repeat(30)}`,
+      annotationColor: "#ffd400",
+      annotationPageLabel: String(i + 1),
+      annotationSortIndex: `${String(i).padStart(5, "0")}|00000000`,
+      tags: [],
+    },
+  };
+});
+const paragraphs = (label, count) =>
+  Array.from({ length: count }, (_, i) => `<p>${label} ${i}: ${"text ".repeat(20)}</p>`).join("");
+
 export const LIBRARY = {
   items: [
     {
@@ -138,6 +163,37 @@ export const LIBRARY = {
         tags: [],
       },
     },
+    {
+      key: "LONG0001",
+      meta: { parsedDate: "1913", numChildren: 4 },
+      data: {
+        key: "LONG0001",
+        itemType: "book",
+        title: "Swann's Way",
+        creators: [{ creatorType: "author", firstName: "Marcel", lastName: "Proust" }],
+        date: "1913",
+        tags: [],
+        collections: [],
+      },
+    },
+    {
+      key: "EPUB0001",
+      meta: {},
+      data: {
+        key: "EPUB0001",
+        itemType: "attachment",
+        parentItem: "LONG0001",
+        title: "EPUB",
+        contentType: "application/epub+zip",
+        linkMode: "imported_file",
+      },
+    },
+    ...bookHighlights,
+    // Made with "Add Note from Annotations": about 115,000 characters
+    { key: "NOTE0002", meta: {}, data: { key: "NOTE0002", itemType: "note", parentItem: "LONG0001", note: paragraphs("Paragraph", BOOK_PARAGRAPHS) } },
+    // About 25,000 characters: too long to share a page with the end of the first
+    { key: "NOTE0003", meta: {}, data: { key: "NOTE0003", itemType: "note", parentItem: "LONG0001", note: paragraphs("Second", 200) } },
+    { key: "NOTE0004", meta: {}, data: { key: "NOTE0004", itemType: "note", parentItem: "LONG0001", note: "<p>Reread the madeleine scene.</p>" } },
     {
       key: "BOOK0001",
       meta: { parsedDate: "2016", numChildren: 0 },

@@ -1,7 +1,7 @@
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { MATH_X, startFakePaperly } from "./fake-paperly.mjs";
+import { BOOK_HIGHLIGHTS, BOOK_PARAGRAPHS, MATH_X, startFakePaperly } from "./fake-paperly.mjs";
 import { startServer } from "./client.mjs";
 import { wellFormed } from "./helpers.mjs";
 
@@ -172,6 +172,61 @@ describe("the tools", () => {
     assert.equal(standalone.text, "## Scanned chapter [SOLO0001]\n- p. 12, underline (blue): “gradient descent”");
     const none = await server.call("get_annotations", { key: "MATH0001" });
     assert.equal(none.text, "There are no highlights or comments on Notation for Variables.");
+  });
+
+  test("get_annotations comes in pages of whole annotations", async () => {
+    const seen = [];
+    let offset = 0;
+    for (;;) {
+      const { text, isError } = await server.call("get_annotations", { key: "LONG0001", offset });
+      assert.equal(isError, false);
+      assert.ok(text.length < 40500, `${text.length} characters from offset ${offset}`);
+      const next = /\n\n\(There is more: call get_annotations with key LONG0001 and offset (\d+)\.\)$/.exec(text);
+      const [heading, ...lines] = (next ? text.slice(0, next.index) : text).split("\n");
+      // A page that starts inside a file's annotations says so
+      assert.equal(heading, offset ? "## EPUB [EPUB0001] (continued)" : "## EPUB [EPUB0001]");
+      for (const line of lines) {
+        const whole = /^- p\. \d+, highlight \(yellow\): “Highlight (\d+): (?:words ){29}words”$/.exec(line);
+        assert.ok(whole, line);
+        seen.push(Number(whole[1]));
+      }
+      if (!next) {
+        break;
+      }
+      offset = Number(next[1]);
+      assert.equal(offset, seen.length);
+    }
+    assert.deepEqual(seen, Array.from({ length: BOOK_HIGHLIGHTS }, (_, i) => i));
+    const past = await server.call("get_annotations", { key: "LONG0001", offset: BOOK_HIGHLIGHTS });
+    assert.equal(past.isError, true);
+    assert.match(past.text, /nothing at offset 300/);
+  });
+
+  test("get_notes comes in pages, and cuts a note longer than a page at a line break", async () => {
+    const pages = [];
+    let offset = 0;
+    for (;;) {
+      const { text, isError } = await server.call("get_notes", { key: "LONG0001", offset });
+      assert.equal(isError, false);
+      assert.ok(text.length < 40500, `${text.length} characters from offset ${offset}`);
+      const next = /\n\n\(There is more: call get_notes with key LONG0001 and offset (\d+)\.\)$/.exec(text);
+      pages.push(next ? text.slice(0, next.index) : text);
+      if (!next) {
+        break;
+      }
+      offset = Number(next[1]);
+    }
+    // The long note on three pages; the next one whole on a page of its own,
+    // as it does not fit after the long note's end; and the last after it
+    assert.deepEqual(
+      pages.map((p) => p.split("\n")[0]),
+      ["## Note [NOTE0002]", "## Note [NOTE0002] (continued)", "## Note [NOTE0002] (continued)", "## Note [NOTE0003]"],
+    );
+    assert.match(pages[3], /\n\n## Note \[NOTE0004\]\nReread the madeleine scene\.$/);
+    // Every paragraph of the long note once, and whole
+    const lines = pages.join("\n").split("\n").filter((line) => line.startsWith("Paragraph "));
+    assert.equal(lines.length, BOOK_PARAGRAPHS);
+    lines.forEach((line, i) => assert.match(line, new RegExp(`^Paragraph ${i}: (?:text ){19}text$`)));
   });
 
   test("get_notes turns HTML notes into text", async () => {
