@@ -108,6 +108,36 @@ describe("the tools", () => {
     assert.equal(fake.requests.at(-1).searchParams.get("qmode"), "everything");
   });
 
+  test("search_library finds the item whose PDF, note or highlight has the words", async () => {
+    const search = async (args) => (await server.call("search_library", { mode: "everything", ...args })).text;
+    // Only in the PDF's full text
+    assert.match(await search({ query: "sinusoids" }), /^1 item\(s\) match “sinusoids”:\n\[ATTN0001\] Attention Is All You Need/);
+    // Only in a child note
+    assert.match(await search({ query: "madeleine" }), /^1 item\(s\) match “madeleine”:\n\[LONG0001\] Swann's Way/);
+    // Only in an annotation, whose file is the paper's child...
+    assert.match(await search({ query: "multi-head" }), /^1 item\(s\) match “multi-head”:\n\[ATTN0001\]/);
+    assert.ok(fake.requests.some((url) => url.searchParams.get("itemKey") === "PDF00001"));
+    // ... or stands alone
+    assert.match(await search({ query: "gradient descent" }), /^1 item\(s\) match “gradient descent”:\n\[SOLO0001\] Scanned chapter/);
+    // A paper is listed once, however many of its parts match
+    assert.match(await search({ query: "words" }), /^1 item\(s\) match “words”:\n\[LONG0001\]/);
+    assert.match(await search({ query: "attention" }), /^1 item\(s\) match/);
+  });
+
+  test("search_library filters and orders what everything finds by the items themselves", async () => {
+    const search = async (args) => (await server.call("search_library", { mode: "everything", ...args })).text;
+    // Both PDFs are titled "Full Text PDF": newest paper first
+    const both = await search({ query: "full text pdf" });
+    assert.match(both, /^2 item\(s\) match .*\n\[MATH0001\] .*\n\[ATTN0001\] /);
+    assert.equal(fake.requests.at(-1).pathname, "/api/users/0/items/top");
+    assert.equal(fake.requests.at(-1).searchParams.get("sort"), "date");
+    assert.match(await search({ query: "full text pdf", limit: 1 }), /^1 item\(s\) match .*\n\[MATH0001\] /);
+    assert.match(await search({ query: "full text pdf", itemType: "book" }), /Nothing in the library matches/);
+    assert.match(await search({ query: "transformer", tag: "transformers" }), /\n\[ATTN0001\] /);
+    // The tag is on the paper's highlight, not on the paper, which is what the filter is for
+    assert.match(await search({ query: "transformer", tag: "core" }), /Nothing in the library matches/);
+  });
+
   test("get_item gives fields, the reference, attachments and notes", async () => {
     const { text } = await server.call("get_item", { key: "ATTN0001", style: "ieee" });
     assert.match(text, /^# Attention Is All You Need/);

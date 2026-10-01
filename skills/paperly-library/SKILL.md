@@ -12,8 +12,8 @@ computer. They never change it.
 
 1. Start with `search_library`. Search titles, authors and years first; use
    `mode: "everything"` only when the words are more likely to be inside the
-   papers or the user's notes. Each result starts with the item's key in
-   [brackets].
+   papers or the user's notes and highlights. Each result starts with the
+   item's key in [brackets].
 2. If the user names a project or a folder, look in `list_collections` and
    then `get_collection_items`.
 3. Use `get_item` to see an item's details and what is attached to it.

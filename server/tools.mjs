@@ -123,7 +123,8 @@ export function addTools(server, paperly) {
     title: "Search the Paperly library",
     description:
       "Finds items (papers, books, chapters...) in the user's Paperly library. By default it matches titles, " +
-      "authors and years; with mode \"everything\" it also searches notes and the full text of PDFs. Returns one " +
+      "authors and years; with mode \"everything\" it also searches all fields and tags, the full text of PDFs, " +
+      "and the user's notes, highlights and comments, and lists the items they belong to. Returns one " +
       "line per item, newest first, starting with the item's key in [brackets]; pass that key to the other tools.",
     inputSchema: {
       type: "object",

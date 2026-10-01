@@ -12,7 +12,7 @@ Everything is read-only: it never changes your library.
 
 | Tool | What it does |
 | --- | --- |
-| `search_library` | Finds items by title, author or year, or anywhere in notes and full text |
+| `search_library` | Finds items by title, author or year, or by words anywhere in them: their full text, notes and highlights |
 | `get_item` | An item's fields, abstract, formatted reference, and its files and notes |
 | `get_fulltext` | The text Paperly extracted from a PDF, EPUB or web page, in slices |
 | `get_annotations` | Your highlights and comments, with page numbers, in reading order |

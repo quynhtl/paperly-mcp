@@ -4,7 +4,7 @@
 // the API is "turned off".
 import http from "node:http";
 
-const pdfText = Array.from({ length: 2500 }, (_, i) => `Sentence ${i} of the paper about attention.`).join(" ");
+const pdfText = `${Array.from({ length: 2500 }, (_, i) => `Sentence ${i} of the paper about attention.`).join(" ")} Positions are encoded with sinusoids.`;
 // A character past U+FFFF (two UTF-16 units) across position 1000
 export const MATH_X = String.fromCodePoint(0x1d465);
 const mathText = `${"x".repeat(999)}${MATH_X}${"y".repeat(1500)}`;
@@ -241,6 +241,19 @@ function withChildren(items) {
   );
 }
 
+// What a quick search looks at in one item. "everything" matches each item on
+// its own: a note by its text, an annotation by its text and comment, a file
+// by the text extracted from it -- and so finds the child, not its parent.
+function searchedText(item, mode) {
+  const d = item.data;
+  const fields = [d.title, d.date, ...(d.creators || []).flatMap((c) => [c.firstName, c.lastName])];
+  if (mode === "everything") {
+    fields.push(d.publicationTitle, d.abstractNote, d.publisher, d.DOI, ...(d.tags || []).map((t) => t.tag));
+    fields.push(d.note?.replace(/<[^>]+>/g, " "), d.annotationText, d.annotationComment, LIBRARY.fulltext[item.key]?.content);
+  }
+  return fields.filter(Boolean).join(" ").toLowerCase();
+}
+
 /** items and items/top, searched the way LocalAPI.Items builds its search. */
 function searchItems(top, q) {
   let items = LIBRARY.items.filter((i) => !top || isTop(i));
@@ -250,9 +263,20 @@ function searchItems(top, q) {
     items = items.filter((i) => scope.includes(i));
   }
   if (q.get("q")) {
+    const mode = q.get("qmode") || "titleCreatorYear";
     const words = q.get("q").toLowerCase().split(/\s+/);
-    const fields = (i) => [i.data.title, i.data.date, ...(i.data.creators || []).map((c) => c.lastName)].join(" ").toLowerCase();
-    items = items.filter((i) => isTop(i) && words.every((word) => fields(i).includes(word)));
+    // Each word may match a different field, but all of them the same item
+    let matches = LIBRARY.items.filter((i) => words.every((word) => searchedText(i, mode).includes(word)));
+    if (mode === "titleCreatorYear") {
+      matches = matches.filter(isTop);
+    }
+    // items/top keeps only the matches that are top-level; items also adds the
+    // files and notes of each match, but never the parent of a child that matched
+    const children = LIBRARY.items.filter(
+      (i) => i.data.itemType !== "annotation" && matches.some((m) => m.key === i.data.parentItem),
+    );
+    const found = top ? matches : [...matches, ...children];
+    items = items.filter((i) => found.includes(i));
   }
   // itemType and tag each narrow the search through a scope that includes
   // children, so a child of an item found so far can come back too
