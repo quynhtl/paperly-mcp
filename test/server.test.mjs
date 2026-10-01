@@ -469,3 +469,52 @@ describe("when Paperly can't be reached", () => {
     await closed.close();
   });
 });
+
+describe("a library or an address Paperly does not have", () => {
+  let fake;
+  before(async () => {
+    fake = await startFakePaperly();
+  });
+  after(() => fake.close());
+
+  const wrong = async (env, library) => {
+    const server = startServer(env);
+    try {
+      // A list Paperly has no answer for is no empty library
+      for (const [tool, args] of [
+        ["search_library", { query: "attention" }],
+        ["search_library", { query: "attention", mode: "everything" }],
+        ["search_library", { query: "attention", tag: "transformers" }],
+        ["list_collections", {}],
+        ["format_bibliography", { keys: ["ATTN0001"] }],
+      ]) {
+        const { text, isError } = await server.call(tool, args);
+        assert.equal(isError, true, tool);
+        assert.ok(text.startsWith(`Paperly has no library "${library}" at http://127.0.0.1:`), text);
+        assert.match(text, /Check PAPERLY_LIBRARY .* and PAPERLY_API_URL /);
+      }
+      // One item may just not be there
+      const item = await server.call("get_item", { key: "ATTN0001" });
+      assert.match(item.text, /^No item in the library has the key ATTN0001/);
+    } finally {
+      await server.close();
+    }
+  };
+
+  test("a group Paperly is not in is said to be wrong, not empty", () =>
+    wrong({ PAPERLY_API_URL: fake.url, PAPERLY_LIBRARY: "groups/999" }, "groups/999"));
+
+  test("an address that is not the local API's is said to be wrong, not empty", () =>
+    wrong({ PAPERLY_API_URL: fake.url.replace(/api\/$/, "") }, "users/0"));
+
+  test("another user's library gets Paperly's own word", async () => {
+    const server = startServer({ PAPERLY_API_URL: fake.url, PAPERLY_LIBRARY: "users/5" });
+    try {
+      const { text, isError } = await server.call("search_library", { query: "attention" });
+      assert.equal(isError, true);
+      assert.match(text, /^Paperly answered 400: Only data for the logged-in user/);
+    } finally {
+      await server.close();
+    }
+  });
+});

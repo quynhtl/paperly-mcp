@@ -1,9 +1,10 @@
 // A stand-in for Paperly's local API with a small library in it, enough to
 // exercise every tool. Answers as the real one does, quirks included: JSON for
 // data, HTML for format=bib, bare keys for format=keys, 404 for an unknown
-// item or collection, 403 when the API is "turned off". It also notes each
-// stored file it describes in JSON, which costs the real one a read of the
-// whole file for its MD5 hash.
+// item or collection -- and for a group it is not in, or a path no endpoint
+// has -- 403 when the API is "turned off". It also notes each stored file it
+// describes in JSON, which costs the real one a read of the whole file for
+// its MD5 hash.
 import http from "node:http";
 
 const pdfText = `${Array.from({ length: 2500 }, (_, i) => `Sentence ${i} of the paper about attention.`).join(" ")} Positions are encoded with sinusoids.`;
@@ -309,6 +310,19 @@ function json(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+function text(res, status, body) {
+  res.writeHead(status, { "Content-Type": "text/plain" });
+  res.end(body);
+}
+
+// The endpoints the fake answers, by their paths under a library
+const ENDPOINTS = [
+  /^items(?:\/top)?$/,
+  /^items\/[^/]+(?:\/children|\/fulltext)?$/,
+  /^collections$/,
+  /^collections\/[^/]+(?:\/items\/top)?$/,
+];
+
 /** Whether describing the object makes Paperly hash a file (Item.toResponseJSONAsync). */
 const storedFile = (o) => o.data?.itemType === "attachment" && o.data.linkMode?.startsWith("imported");
 
@@ -361,12 +375,22 @@ export function startFakePaperly(options = { enabled: true }) {
     }
   });
   const answer = (url, res) => {
-    if (options.enabled === false) {
-      res.writeHead(403, { "Content-Type": "text/plain" });
-      res.end("Local API is not enabled");
-      return;
+    // Paperly finds the endpoint first, and only then looks at the library: My
+    // Library is user 0, and this Paperly is in no group
+    const at = /^\/api\/(users|groups)\/([^/]+)\/(.+)$/.exec(url.pathname);
+    if (!at || !ENDPOINTS.some((endpoint) => endpoint.test(at[3]))) {
+      return text(res, 404, "No endpoint found\n");
     }
-    const path = url.pathname.replace(/^\/api\/users\/0\//, "");
+    if (options.enabled === false) {
+      return text(res, 403, "Local API is not enabled");
+    }
+    const [, kind, id, path] = at;
+    if (kind === "users" && parseInt(id, 10) !== 0) {
+      return text(res, 400, "Only data for the logged-in user is available locally -- use userID 0");
+    }
+    if (kind === "groups") {
+      return text(res, 404, "Not found");
+    }
     const q = url.searchParams;
     let m;
     if ((path === "items" || path === "items/top") && q.get("format") === "bib") {
@@ -389,11 +413,11 @@ export function startFakePaperly(options = { enabled: true }) {
     }
     if ((m = /^items\/([A-Z0-9]{8})\/fulltext$/.exec(path))) {
       const fulltext = LIBRARY.fulltext[m[1]];
-      return fulltext ? json(res, 200, fulltext) : json(res, 404, "Not found");
+      return fulltext ? json(res, 200, fulltext) : text(res, 404, "Not found");
     }
     if ((m = /^items\/([A-Z0-9]{8})$/.exec(path))) {
       const item = LIBRARY.items.find((i) => i.key === m[1]);
-      if (!item) return json(res, 404, "Not found");
+      if (!item) return text(res, 404, "Not found");
       if (storedFile(item)) {
         hashed.push(item.key);
       }
@@ -412,7 +436,7 @@ export function startFakePaperly(options = { enabled: true }) {
     }
     if ((m = /^collections\/([A-Z0-9]{8})$/.exec(path))) {
       const collection = LIBRARY.collections.find((c) => c.key === m[1]);
-      return collection ? json(res, 200, collection) : json(res, 404, "Not found");
+      return collection ? json(res, 200, collection) : text(res, 404, "Not found");
     }
     if ((m = /^collections\/([A-Z0-9]{8})\/items\/top$/.exec(path))) {
       // Paperly drops the condition on a collection it cannot find, and so lists
@@ -420,7 +444,7 @@ export function startFakePaperly(options = { enabled: true }) {
       const known = LIBRARY.collections.some((c) => c.key === m[1]);
       return list(res, LIBRARY.items.filter((i) => isTop(i) && (!known || i.data.collections?.includes(m[1]))), q, hashed);
     }
-    json(res, 404, "Not found");
+    text(res, 404, "Not found");
   };
   const close = () => {
     for (const timer of timers) {

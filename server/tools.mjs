@@ -45,7 +45,7 @@ const COLORS = {
 };
 
 function ofType(items, type) {
-  return (items || []).filter((child) => child.data?.itemType === type);
+  return items.filter((child) => child.data?.itemType === type);
 }
 
 async function requireItem(paperly, key) {
@@ -360,7 +360,7 @@ export function addTools(server, paperly) {
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: READ_ONLY,
     async run() {
-      const collections = (await paperly.collections()) || [];
+      const collections = await paperly.collections();
       if (!collections.length) {
         return "The library has no collections.";
       }
@@ -406,7 +406,7 @@ export function addTools(server, paperly) {
       if (!(await paperly.collection(key))) {
         throw new ToolError(`No collection has the key ${key}. Find keys with list_collections.`);
       }
-      const items = (await paperly.collectionItems(key, { limit })) || [];
+      const items = await paperly.collectionItems(key, { limit });
       return items.length ? items.map(itemLine).join("\n") : "The collection is empty.";
     },
   });
@@ -435,7 +435,7 @@ export function addTools(server, paperly) {
     annotations: READ_ONLY_FETCHES_STYLES,
     async run({ keys, style = "apa", locale }) {
       const html = await paperly.bibliography(keys, { style, locale });
-      const text = html === null ? "" : htmlToText(html);
+      const text = htmlToText(html);
       if (!text) {
         throw new ToolError("None of those keys are items in the library.");
       }

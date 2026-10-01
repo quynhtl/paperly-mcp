@@ -49,8 +49,15 @@ export class Paperly {
     this.fileLimit = fileLimit;
   }
 
-  /** GET a path under the library (or, with `absolute`, under /api/). */
-  async get(path, params = {}, { absolute = false, as = "json" } = {}) {
+  /**
+   * GET a path under the library (or, with `absolute`, under /api/).
+   *
+   * A 404 for a `lookup` -- one item, collection or full text, by its key --
+   * is null: that one is not there. For a list it is never that, as Paperly
+   * answers a list with what it has, if nothing: the library itself is not
+   * there, or Paperly's local API is not at that address.
+   */
+  async get(path, params = {}, { absolute = false, as = "json", lookup = false } = {}) {
     const url = new URL(absolute ? path : `${this.library}/${path}`, this.root);
     for (const [name, value] of Object.entries(params)) {
       if (value !== undefined && value !== null && value !== "") {
@@ -88,7 +95,14 @@ export class Paperly {
       );
     }
     if (response.status === 404) {
-      return null;
+      if (lookup) {
+        return null;
+      }
+      throw new ToolError(
+        `Paperly has no library "${this.library}" at ${this.root}. Check PAPERLY_LIBRARY ` +
+          `("users/0" for My Library, "groups/<group id>" for a group's) and PAPERLY_API_URL ` +
+          `(normally ${DEFAULT_API_URL}) in the Paperly MCP server's environment.`,
+      );
     }
     if (!response.ok) {
       const body = await read("text");
@@ -118,7 +132,7 @@ export class Paperly {
     if (mode !== "everything") {
       if (!itemType && !tag) {
         const items = await this.get("items/top", { ...found, limit, ...NEWEST_FIRST });
-        return { items: items || [], untraced: 0 };
+        return { items, untraced: 0 };
       }
       // itemType and tag also bring in the files, notes and annotations of the
       // matches, so the answer is picked by key, as for everything. The search
@@ -155,7 +169,7 @@ export class Paperly {
       }
       if (others.length) {
         // A note names its item; an annotation, its file. Never a file here.
-        for (const part of (await this.get("items", { itemKey: others.join(","), itemType: "note || annotation" })) || []) {
+        for (const part of await this.get("items", { itemKey: others.join(","), itemType: "note || annotation" })) {
           if (part.data.itemType === "annotation") {
             files.add(part.data.parentItem);
           } else {
@@ -167,7 +181,7 @@ export class Paperly {
     const traced = [...files].slice(0, this.fileLimit);
     if (traced.length) {
       // A file stands alone or names its item
-      for (const file of (await this.get("items", { itemKey: traced.join(","), itemType: "attachment" })) || []) {
+      for (const file of await this.get("items", { itemKey: traced.join(","), itemType: "attachment" })) {
         owners.add(file.data.parentItem || file.key);
       }
     }
@@ -178,7 +192,7 @@ export class Paperly {
   /** The keys of what a list request finds: Paperly lists them without describing anything. */
   async keys(path, params) {
     const text = await this.get(path, { ...params, format: "keys" }, { as: "text" });
-    return (text || "").split("\n").filter(Boolean);
+    return text.split("\n").filter(Boolean);
   }
 
   /**
@@ -204,11 +218,11 @@ export class Paperly {
     if (!chosen.length) {
       return [];
     }
-    return (await this.get("items/top", { itemKey: chosen.join(","), ...NEWEST_FIRST })) || [];
+    return this.get("items/top", { itemKey: chosen.join(","), ...NEWEST_FIRST });
   }
 
   item(key, { style } = {}) {
-    return this.get(`items/${encodeURIComponent(key)}`, { include: "data,bib", style });
+    return this.get(`items/${encodeURIComponent(key)}`, { include: "data,bib", style }, { lookup: true });
   }
 
   children(key) {
@@ -224,7 +238,7 @@ export class Paperly {
   }
 
   fulltext(key) {
-    return this.get(`items/${encodeURIComponent(key)}/fulltext`);
+    return this.get(`items/${encodeURIComponent(key)}/fulltext`, {}, { lookup: true });
   }
 
   collections() {
@@ -233,7 +247,7 @@ export class Paperly {
   }
 
   collection(key) {
-    return this.get(`collections/${encodeURIComponent(key)}`);
+    return this.get(`collections/${encodeURIComponent(key)}`, {}, { lookup: true });
   }
 
   collectionItems(key, { limit = 50 } = {}) {

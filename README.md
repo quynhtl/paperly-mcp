@@ -44,8 +44,17 @@ The server needs Node.js 18 or later and nothing else: it has no dependencies,
 so nothing is downloaded when you install it.
 
 To use another library than My Library, set `PAPERLY_LIBRARY` to
-`groups/<group id>` in the server's environment. `PAPERLY_API_URL` changes where
-the server looks for Paperly (default `http://127.0.0.1:23119/api/`).
+`groups/<group id>` in the server's environment. Paperly lists your groups, each
+with its `id` and `name`, through its local API. It turns browsers away there,
+so ask from a terminal while Paperly is open:
+
+```sh
+curl http://127.0.0.1:23119/api/users/0/groups
+```
+
+`PAPERLY_API_URL` changes where the server looks for Paperly (default
+`http://127.0.0.1:23119/api/`). If either setting is wrong, the tools say so
+instead of finding nothing.
 
 ## Privacy policy
 
