@@ -29,6 +29,8 @@ describe("the protocol", () => {
     assert.equal(result.serverInfo.name, "paperly");
     assert.equal(result.serverInfo.version, manifest.version);
     assert.match(result.instructions, /search_library/);
+    // A style download installs a style; it is said, not hidden
+    assert.match(result.instructions, /zotero\.org\/styles/);
     server.notify("notifications/initialized");
   });
 
@@ -55,6 +57,10 @@ describe("the protocol", () => {
       assert.equal(tool.inputSchema.type, "object", tool.name);
       assert.equal(tool.annotations.readOnlyHint, true, tool.name);
       assert.equal(tool.annotations.title, tool.title, tool.name);
+      // Only a citation style Paperly doesn't have yet reaches past this computer
+      const fetchesStyles = tool.name === "get_item" || tool.name === "format_bibliography";
+      assert.equal(tool.annotations.openWorldHint, fetchesStyles, tool.name);
+      assert.equal(/zotero\.org\/styles/.test(tool.description), fetchesStyles, tool.name);
     }
   });
 
@@ -80,6 +86,26 @@ describe("the protocol", () => {
     const extra = await server.call("search_library", { query: "x", delete: true });
     assert.match(extra.text, /not an argument/);
     assert.equal(fake.requests.length, before);
+  });
+
+  test("a citation style is a style's id, never an address Paperly would fetch it from", async () => {
+    const before = fake.requests.length;
+    for (const style of ["https://evil.example/x.csl?d=notes", "//evil.example/apa", "apa/../x", "APA", "apa.csl"]) {
+      const item = await server.call("get_item", { key: "ATTN0001", style });
+      assert.equal(item.isError, true, style);
+      assert.match(item.text, /"style" is not in the expected format/);
+      const bibliography = await server.call("format_bibliography", { keys: ["ATTN0001"], style });
+      assert.equal(bibliography.isError, true, style);
+    }
+    for (const locale of ["../x", "en_US", "https://evil.example"]) {
+      const bibliography = await server.call("format_bibliography", { keys: ["ATTN0001"], locale });
+      assert.match(bibliography.text, /"locale" is not in the expected format/, locale);
+    }
+    assert.equal(fake.requests.length, before);
+    const fine = await server.call("format_bibliography", { keys: ["ATTN0001"], style: "chicago-author-date", locale: "vi-VN" });
+    assert.equal(fine.isError, false);
+    assert.equal(fake.requests.at(-1).searchParams.get("style"), "chicago-author-date");
+    assert.equal(fake.requests.at(-1).searchParams.get("locale"), "vi-VN");
   });
 });
 

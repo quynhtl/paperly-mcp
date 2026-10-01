@@ -41,7 +41,9 @@ abstract (in `get_item`) and the user's annotations are often enough.
   doesn't hold something, say so.
 - For a reference list, use `format_bibliography` with the keys and the style
   the user wants (APA unless they say otherwise) rather than writing references
-  by hand.
+  by hand. Name the style by its id in the Zotero Style Repository, such as
+  `apa`, `chicago-author-date` or `ieee`; Paperly downloads one it doesn't have
+  from zotero.org.
 
 ## When the tools can't reach Paperly
 

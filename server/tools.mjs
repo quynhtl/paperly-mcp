@@ -3,12 +3,21 @@ import { ToolError } from "./mcp.mjs";
 import { charBoundary, htmlToText, itemDetails, itemLine } from "./text.mjs";
 
 const READ_ONLY = { readOnlyHint: true, openWorldHint: false };
+// Asked for a citation style it does not have, Paperly downloads it from zotero.org
+const READ_ONLY_FETCHES_STYLES = { readOnlyHint: true, openWorldHint: true };
 
 const KEY = {
   type: "string",
   pattern: "^[A-Z0-9]{8}$",
   description: "An item's 8-character key, as shown in [brackets] by search_library",
 };
+
+// A style's id in the Zotero Style Repository, and nothing else. Paperly
+// installs a style it does not have from https://www.zotero.org/styles/<id>,
+// quietly, replacing any installed style with the same id or title; given a
+// URL instead, it would fetch from wherever the URL points.
+const STYLE = { type: "string", pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$", maxLength: 200 };
+const STYLE_DOWNLOAD = "A style Paperly doesn't have yet is downloaded from zotero.org/styles and installed.";
 
 // Full text comes back in slices: long papers would otherwise fill the context
 const SLICE = 20000;
@@ -157,21 +166,22 @@ export function addTools(server, paperly) {
     title: "Get an item's details",
     description:
       "Everything the library holds about one item: its fields, creators, tags, abstract, a formatted reference, " +
-      "and what is attached to it (files, notes).",
+      `and what is attached to it (files, notes). ${STYLE_DOWNLOAD}`,
     inputSchema: {
       type: "object",
       properties: {
         key: KEY,
         style: {
-          type: "string",
-          maxLength: 200,
-          description: "Citation style for the reference, such as apa (the default), chicago-author-date or ieee",
+          ...STYLE,
+          description:
+            "Citation style for the reference, by its id in the Zotero Style Repository: apa (the default), " +
+            "chicago-author-date, ieee...",
         },
       },
       required: ["key"],
       additionalProperties: false,
     },
-    annotations: READ_ONLY,
+    annotations: READ_ONLY_FETCHES_STYLES,
     async run({ key, style = "apa" }) {
       const item = await paperly.item(key, { style });
       if (!item) {
@@ -377,19 +387,24 @@ export function addTools(server, paperly) {
     name: "format_bibliography",
     title: "Format references",
     description:
-      "A bibliography for the given items in a citation style installed in Paperly, such as apa, " +
-      "chicago-author-date, ieee, modern-language-association or nature.",
+      "A bibliography for the given items in a citation style, named by its id in the Zotero Style Repository, " +
+      `such as apa, chicago-author-date, ieee, modern-language-association or nature. ${STYLE_DOWNLOAD}`,
     inputSchema: {
       type: "object",
       properties: {
         keys: { type: "array", items: KEY, minItems: 1, maxItems: 100, description: "The items' keys" },
-        style: { type: "string", maxLength: 200, description: "Citation style (default apa)" },
-        locale: { type: "string", maxLength: 20, description: "Language of the references, such as en-US or vi-VN" },
+        style: { ...STYLE, description: "Citation style, by its id in the Zotero Style Repository (default apa)" },
+        locale: {
+          type: "string",
+          pattern: "^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$",
+          maxLength: 20,
+          description: "Language of the references, such as en-US or vi-VN",
+        },
       },
       required: ["keys"],
       additionalProperties: false,
     },
-    annotations: READ_ONLY,
+    annotations: READ_ONLY_FETCHES_STYLES,
     async run({ keys, style = "apa", locale }) {
       const html = await paperly.bibliography(keys, { style, locale });
       const text = html === null ? "" : htmlToText(html);

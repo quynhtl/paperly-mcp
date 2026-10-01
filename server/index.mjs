@@ -19,7 +19,9 @@ const server = new McpServer({
     "These tools read the user's Paperly library (a reference manager for research papers). " +
     "Start with search_library or list_collections to find items; every item has an 8-character key. " +
     "Use get_item for details, get_fulltext to read a paper, get_annotations for what the user highlighted, " +
-    "and format_bibliography for references. Nothing here changes the library.",
+    "and format_bibliography for references. None of them changes the library. Citation styles are named by " +
+    "their id in the Zotero Style Repository, such as apa or ieee; asking for one Paperly doesn't have makes " +
+    "Paperly download it from zotero.org/styles and install it.",
 });
 
 addTools(

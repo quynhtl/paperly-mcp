@@ -6,7 +6,9 @@ read a paper's full text, or put together a reference list, and it answers from
 your own library instead of from memory.
 
 The plugin adds a local MCP server and a skill that tells Claude how to use it.
-Everything is read-only: it never changes your library.
+Everything is read-only: it never changes your library. The one thing it can
+add to Paperly is a citation style Claude asks for, from the Zotero Style
+Repository (see the privacy policy below).
 
 ## What Claude can do with it
 
@@ -19,7 +21,7 @@ Everything is read-only: it never changes your library.
 | `get_notes` | Your notes on an item, as plain text |
 | `list_collections` | Your collections, nested as in Paperly |
 | `get_collection_items` | The items in one collection |
-| `format_bibliography` | References in any citation style installed in Paperly |
+| `format_bibliography` | References in any citation style of the Zotero Style Repository |
 
 ## Set it up
 
@@ -57,11 +59,20 @@ Claude, and is handled under the terms of your Claude account, like anything
 else you share in a conversation. The plugin itself sends nothing anywhere
 else: it makes no network requests other than to Paperly on your computer.
 
+**Citation styles.** `get_item` and `format_bibliography` name a citation
+style by its id in the [Zotero Style Repository](https://www.zotero.org/styles),
+such as `apa`. When Claude asks for a style Paperly doesn't have yet, Paperly
+downloads it from `https://www.zotero.org/styles/<id>` and installs it,
+without asking first. That request carries the style's id and nothing from
+your library. The plugin accepts only such ids, never an address, so no style
+can come from anywhere else.
+
 **What it keeps.** Nothing. It has no storage, no logs beyond Claude's own, no
 analytics and no telemetry.
 
 **Third parties.** None, other than Anthropic as the provider of the Claude
-conversation you use it in.
+conversation you use it in, and zotero.org when Paperly downloads a citation
+style from it.
 
 **Contact.** Questions or problems: open an issue at
 <https://github.com/quynhtl/paperly-mcp/issues>.
