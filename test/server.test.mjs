@@ -314,6 +314,36 @@ describe("the tools", () => {
   });
 });
 
+describe("a slow Paperly", () => {
+  let fake;
+  before(async () => {
+    fake = await startFakePaperly({ enabled: true, delay: 500 });
+  });
+  after(() => fake.close());
+
+  test("holds up no message but the ones waiting on it", { timeout: 10000 }, async () => {
+    const server = startServer({ PAPERLY_API_URL: fake.url });
+    try {
+      const answered = [];
+      const item = server.call("get_item", { key: "ATTN0001" }).then((r) => answered.push("get_item") && r);
+      const ping = server.request("ping").then((r) => answered.push("ping") && r);
+      assert.deepEqual((await ping).result, {});
+      assert.match((await item).text, /^# Attention Is All You Need/);
+      assert.deepEqual(answered, ["ping", "get_item"]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test("still gets its answers out when the input ends", { timeout: 10000 }, async () => {
+    const server = startServer({ PAPERLY_API_URL: fake.url });
+    const item = server.call("get_item", { key: "ATTN0001" });
+    const closed = server.close();
+    assert.match((await item).text, /^# Attention Is All You Need/);
+    await closed;
+  });
+});
+
 describe("when Paperly can't be reached", () => {
   test("a closed Paperly and a switched-off API each say what to do", async () => {
     const fake = await startFakePaperly({ enabled: false });

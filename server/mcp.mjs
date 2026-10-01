@@ -178,10 +178,13 @@ export class McpServer {
     }
   }
 
-  /** Serves on a pair of streams until the input ends. */
+  /** Serves on a pair of streams until the input ends, and every answer is out. */
   listen(input = process.stdin, output = process.stdout) {
     let buffer = "";
-    let queue = Promise.resolve();
+    // Each message is answered as soon as it can be: one that waits on Paperly
+    // holds up no other, and JSON-RPC pairs answers with requests by id, not
+    // by order
+    const pending = new Set();
     input.setEncoding("utf8");
     input.on("data", (chunk) => {
       buffer += chunk;
@@ -190,12 +193,14 @@ export class McpServer {
         const line = buffer.slice(0, newline).trim();
         buffer = buffer.slice(newline + 1);
         if (line) {
-          // In order: a response never overtakes the one before it
-          queue = queue.then(() => this.receive(line, output));
+          const answering = this.receive(line, output)
+            .catch((e) => this.log("Could not answer a message:", e))
+            .finally(() => pending.delete(answering));
+          pending.add(answering);
         }
       }
     });
-    return new Promise((resolve) => input.on("end", () => queue.then(resolve)));
+    return new Promise((resolve) => input.on("end", () => Promise.all(pending).then(resolve)));
   }
 
   async receive(line, output) {

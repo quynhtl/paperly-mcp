@@ -312,13 +312,29 @@ function list(res, objects, q) {
   json(res, 200, objects.slice(start, start + limit));
 }
 
-/** Starts the fake on a free port. `options.enabled = false` answers 403, as Paperly does with the API off. */
+/**
+ * Starts the fake on a free port. `options.enabled = false` answers 403, as
+ * Paperly does with the API off; `options.delay` waits that many milliseconds
+ * before answering, as a busy or stuck Paperly does.
+ */
 export function startFakePaperly(options = { enabled: true }) {
   const requests = [];
+  const timers = new Set();
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, "http://localhost");
     requests.push(url);
-    if (!options.enabled) {
+    if (options.delay) {
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        answer(url, res);
+      }, options.delay);
+      timers.add(timer);
+    } else {
+      answer(url, res);
+    }
+  });
+  const answer = (url, res) => {
+    if (options.enabled === false) {
       res.writeHead(403, { "Content-Type": "text/plain" });
       res.end("Local API is not enabled");
       return;
@@ -372,11 +388,18 @@ export function startFakePaperly(options = { enabled: true }) {
       return list(res, LIBRARY.items.filter((i) => isTop(i) && (!known || i.data.collections?.includes(m[1]))), q);
     }
     json(res, 404, "Not found");
-  });
+  };
+  const close = () => {
+    for (const timer of timers) {
+      clearTimeout(timer);
+    }
+    server.closeAllConnections();
+    return new Promise((resolve) => server.close(resolve));
+  };
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
       const { port } = server.address();
-      resolve({ url: `http://127.0.0.1:${port}/api/`, requests, options, close: () => new Promise((r) => server.close(r)) });
+      resolve({ url: `http://127.0.0.1:${port}/api/`, requests, options, close });
     });
   });
 }

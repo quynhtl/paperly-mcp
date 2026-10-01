@@ -6,16 +6,28 @@ import { charBoundary } from "./text.mjs";
 
 export const DEFAULT_API_URL = "http://127.0.0.1:23119/api/";
 
+// A request Paperly has taken but not answered in this long counts as lost.
+// Paperly answers in milliseconds when it is well; when it is stuck, fetch
+// alone would wait five minutes, and the conversation with it.
+export const DEFAULT_TIMEOUT = 15000;
+
 export class Paperly {
   /**
    * @param {object} [options]
    * @param {string} [options.apiURL] - The local API's root, ending in /api/
    * @param {string} [options.library] - "users/0" for My Library, or "groups/<id>"
+   * @param {number} [options.timeout] - Milliseconds to wait for an answer
    */
-  constructor({ apiURL = DEFAULT_API_URL, library = "users/0", fetch = globalThis.fetch } = {}) {
+  constructor({
+    apiURL = DEFAULT_API_URL,
+    library = "users/0",
+    fetch = globalThis.fetch,
+    timeout = DEFAULT_TIMEOUT,
+  } = {}) {
     this.root = apiURL.endsWith("/") ? apiURL : `${apiURL}/`;
     this.library = library;
     this.fetch = fetch;
+    this.timeout = timeout;
   }
 
   /** GET a path under the library (or, with `absolute`, under /api/). */
@@ -26,14 +38,27 @@ export class Paperly {
         url.searchParams.set(name, String(value));
       }
     }
+    const signal = AbortSignal.timeout(this.timeout);
+    const notResponding = () =>
+      new ToolError(
+        `Paperly is not responding: it took the request but did not answer within ${this.timeout / 1000} seconds. ` +
+          "It may be busy; try again in a moment, and if it stays like this, restart Paperly.",
+      );
     let response;
     try {
-      response = await this.fetch(url, { headers: { Accept: "application/json" } });
+      response = await this.fetch(url, { headers: { Accept: "application/json" }, signal });
     } catch {
-      throw new ToolError(
-        "Paperly isn't answering. Make sure Paperly is open; if it is, its local server may be turned off.",
-      );
+      throw signal.aborted
+        ? notResponding()
+        : new ToolError(
+            "Paperly isn't answering. Make sure Paperly is open; if it is, its local server may be turned off.",
+          );
     }
+    // The time runs on while the answer arrives
+    const read = (how) =>
+      response[how]().catch((e) => {
+        throw signal.aborted ? notResponding() : e;
+      });
     if (response.status === 403) {
       throw new ToolError(
         'Paperly\'s local API is turned off. In Paperly, open Settings → Advanced and tick "Allow other applications on this computer to communicate with Paperly", then try again.',
@@ -43,10 +68,10 @@ export class Paperly {
       return null;
     }
     if (!response.ok) {
-      const body = await response.text();
+      const body = await read("text");
       throw new ToolError(`Paperly answered ${response.status}: ${body.slice(0, charBoundary(body, 200))}`);
     }
-    return as === "text" ? response.text() : response.json();
+    return read(as);
   }
 
   /**
